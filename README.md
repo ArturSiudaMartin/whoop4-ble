@@ -59,6 +59,7 @@ Read these in order depending on what you want to do:
 | If you want to… | Read |
 |------------------|------|
 | **Use it** — pull your own data, set up a sync | This README's [Quickstart](#quickstart) → run the [examples/](examples/) |
+| **Use it from an Android phone** (no PC, no Python) | [`docs/ANDROID.md`](docs/ANDROID.md) — Web Bluetooth page in `web/index.html` |
 | **Understand what every packet means** | [`docs/SAMPLE_SESSION.md`](docs/SAMPLE_SESSION.md) — annotated real captures |
 | **Look up the protocol** (frame format, commands, byte offsets) | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the authoritative reference |
 | **Know what's still unknown** | [`docs/STATUS.md`](docs/STATUS.md) — what's decoded, what's partially understood, what's a black box |
@@ -109,9 +110,12 @@ whoop4-ble/
 ├── README.md                       This file — start here
 ├── CONTRIBUTING.md                 How to extend the RE / probe new commands safely
 ├── docs/
+│   ├── ANDROID.md                  Android / Web Bluetooth setup
 │   ├── PROTOCOL.md                 Authoritative protocol reference
 │   ├── SAMPLE_SESSION.md           Real annotated packet captures, end-to-end
 │   └── STATUS.md                   What's decoded, what's pending, what's a black box
+├── web/
+│   └── index.html                  Web Bluetooth app (Chrome on Android) — see docs/ANDROID.md
 ├── examples/                       Minimal single-file scripts to copy-paste
 │   ├── 01_fix_rtc.py               SET_CLOCK with the 5-byte payload
 │   ├── 02_drain_to_jsonl.py        Historical data → ./data/hr.jsonl

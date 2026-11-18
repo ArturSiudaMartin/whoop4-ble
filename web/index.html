@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Whoop BLE</title>
+<!--
+  Whoop 4.0 direct BLE access from a browser (Web Bluetooth).
+  Works in Chrome on Android (and desktop Chrome/Edge). Must be served over HTTPS or from localhost.
+
+  Port of src/whoop4/packet.py + drain.py + reader.py — see docs/PROTOCOL.md for the protocol.
+  Data is stored in this browser's IndexedDB; each batch is committed BEFORE it is ACKed to the
+  band (the ACK frees that data on the strap), so a crash mid-sync never loses records.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --fg: #15171c; --muted: #6b7280; --line: #e3e5ea;
+    --accent: #e0352b; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --btn: #15171c; --btn-fg: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --card: #181b21; --fg: #eceef2; --muted: #9aa1ad; --line: #2a2e37;
+      --accent: #ff5a4f; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --btn: #eceef2; --btn-fg: #0f1115;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --card: #181b21; --fg: #eceef2; --muted: #9aa1ad; --line: #2a2e37;
+    --accent: #ff5a4f; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --btn: #eceef2; --btn-fg: #0f1115;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  main { max-width: 560px; margin: 0 auto; display: grid; gap: 12px; }
+  header { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--ok); }
+  .dot.busy { background: var(--warn); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 14px;
+    background: var(--btn); color: var(--btn-fg); cursor: pointer; min-height: 44px;
+  }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  button.danger { background: transparent; color: var(--bad); border: 1px solid var(--line); }
+  button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > button { flex: 1 1 auto; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .hr { display: flex; align-items: baseline; gap: 8px; }
+  .hr .big { font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .stats div { font-variant-numeric: tabular-nums; }
+  .stats b { display: block; font-size: 18px; }
+  canvas { width: 100%; height: 70px; display: block; margin-top: 10px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-variant-numeric: tabular-nums; }
+  dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+  label.check { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; font-size: 14px; }
+  label.check input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+  progress { width: 100%; height: 6px; margin: 0 0 12px; accent-color: var(--accent); }
+  #log {
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap;
+    overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; margin: 0; color: var(--muted);
+  }
+  #unsupported { display: none; border-color: var(--bad); }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Whoop BLE</h1>
+    <button id="btnConnect">Connect</button>
+  </header>
+
+  <section id="unsupported">
+    <h2>Web Bluetooth unavailable</h2>
+    <p id="unsupportedMsg" style="margin:0"></p>
+  </section>
+
+  <section>
+    <h2>Live heart rate</h2>
+    <div class="hr"><span class="big" id="hr">--</span><span class="muted">bpm</span></div>
+    <div class="stats">
+      <div><span class="muted">Last RR</span><b id="rr">--</b></div>
+      <div><span class="muted">RMSSD 60s</span><b id="rmssd">--</b></div>
+      <div><span class="muted">Samples</span><b id="samples">0</b></div>
+    </div>
+    <canvas id="spark"></canvas>
+  </section>
+
+  <section>
+    <h2>Band clock</h2>
+    <dl>
+      <dt>RTC</dt><dd id="rtc">unknown</dd>
+      <dt>Drift</dt><dd id="drift">--</dd>
+    </dl>
+    <div class="row">
+      <button id="btnClock" class="secondary" disabled>Fix &amp; check clock</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0">Sends the 5-byte SET_CLOCK, then reads the clock back. If a sync returns zero records while you've been wearing the band, do this first.</p>
+  </section>
+
+  <section>
+    <h2>Sync stored data</h2>
+    <dl>
+      <dt>Status</dt><dd id="syncStatus">idle</dd>
+      <dt>Pass / batches</dt><dd id="syncPass">--</dd>
+      <dt>New this sync</dt><dd id="syncNew">0</dd>
+      <dt>Latest record</dt><dd id="syncLatest">--</dd>
+      <dt>Stored on phone</dt><dd id="stored">--</dd>
+    </dl>
+    <progress id="syncProg" hidden></progress>
+    <label class="check">
+      <input type="checkbox" id="optAck" checked>
+      <span>ACK batches <span class="muted">— tells the band to move on to the next batch (and frees its storage). Turn off for a read-only pass; the band will then keep resending the first batch.</span></span>
+    </label>
+    <div class="row">
+      <button id="btnSync" disabled>Sync</button>
+      <button id="btnStop" class="secondary" disabled>Stop</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnDlHr" class="secondary">hr.jsonl</button>
+      <button id="btnDlEv" class="secondary">events.jsonl</button>
+      <button id="btnClear" class="danger">Clear</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+
+  <p class="muted" style="text-align:center;margin:0">
+    Unpair or force-stop the official Whoop app first — it holds the band's BLE connection.<br>
+    <a href="#" id="lnkAll">Band not showing in the picker? Show all devices</a>
+  </p>
+</main>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------- BLE constants
+const SVC       = '61080001-8d6d-82b8-614a-1c8cb0f8dcc6';
+const CMD_TO    = '61080002-8d6d-82b8-614a-1c8cb0f8dcc6';
+const CMD_FROM  = '61080003-8d6d-82b8-614a-1c8cb0f8dcc6';
+const DATA_FROM = '61080005-8d6d-82b8-614a-1c8cb0f8dcc6';
+
+const PT = { COMMAND: 0x23, COMMAND_RESPONSE: 0x24, REALTIME_DATA: 0x28, REALTIME_RAW_DATA: 0x2B,
+             HISTORICAL_DATA: 0x2F, EVENT: 0x30, METADATA: 0x31, CONSOLE_LOGS: 0x32 };
+const CMD = { SET_CLOCK: 0x0A, GET_CLOCK: 0x0B, ABORT_HISTORICAL_TRANSMITS: 0x14,
+              SEND_HISTORICAL_DATA: 0x16, HISTORICAL_DATA_RESULT: 0x17 };
+const META = { HISTORY_START: 1, HISTORY_END: 2, HISTORY_COMPLETE: 3 };
+const EV = { BATTERY_LEVEL: 3, WRIST_ON: 9, WRIST_OFF: 10, DOUBLE_TAP: 14, TEMPERATURE_LEVEL: 17,
+             SENSOR_SNAPSHOT: 29, STATE_MARKER_A: 101, STATE_MARKER_B: 102, STATE_MARKER_C: 103 };
+
+const TS_MIN = 1577836800, TS_MAX = 1893456000;   // 2020..2030
+
+// ---------------------------------------------------------------- CRC + framing (packet.py)
+const CRC8_T = new Uint8Array(256), CRC32_T = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let k = 0; k < 8; k++) c = c & 0x80 ? ((c << 1) ^ 0x07) & 0xFF : (c << 1) & 0xFF;
+  CRC8_T[i] = c;
+  c = i;
+  for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xEDB88320 : c >>> 1;
+  CRC32_T[i] = c >>> 0;
+}
+const crc8 = (b) => { let c = 0; for (const x of b) c = CRC8_T[c ^ x]; return c; };
+const crc32 = (b) => { let c = 0xFFFFFFFF; for (const x of b) c = CRC32_T[(c ^ x) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+
+function u32le(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+
+function frame(cmd, data = []) {
+  const payload = Uint8Array.from([PT.COMMAND, 0, cmd, ...data]);
+  const len = payload.length + 4;
+  const lenB = [len & 0xFF, len >> 8];
+  return Uint8Array.from([0xAA, ...lenB, crc8(lenB), ...payload, ...u32le(crc32(payload))]);
+}
+
+function parseFrame(raw) {
+  if (raw.length < 8 || raw[0] !== 0xAA) return null;
+  const len = raw[1] | (raw[2] << 8);
+  const payload = raw.subarray(4, 4 + len - 4);
+  if (payload.length < 3) return null;
+  return { type: payload[0], seq: payload[1], cmd: payload[2], data: payload.subarray(3) };
+}
+
+// Reassembles frames split across notifications (only matters if the MTU is small;
+// with Chrome's default Android MTU each notification is one whole frame, as bleak assumes).
+function assembler(onFrame) {
+  let buf = null, need = 0;
+  return (chunk) => {
+    if (chunk[0] === 0xAA && chunk.length >= 4) {
+      const total = 4 + (chunk[1] | (chunk[2] << 8));
+      if (total > 4096) { buf = null; return; }
+      if (chunk.length >= total) { buf = null; onFrame(chunk.subarray(0, total)); return; }
+      buf = [chunk]; need = total - chunk.length; return;
+    }
+    if (!buf) return;
+    buf.push(chunk); need -= chunk.length;
+    if (need <= 0) {
+      const all = new Uint8Array(buf.reduce((n, c) => n + c.length, 0));
+      let o = 0; for (const c of buf) { all.set(c, o); o += c.length; }
+      buf = null;
+      onFrame(all.subarray(0, all.length + need));
+    }
+  };
+}
+
+const dv = (b) => new DataView(b.buffer, b.byteOffset, b.byteLength);
+
+function parseHistoricalRecord(d) {
+  if (d.length < 15) return null;
+  const v = dv(d);
+  const timestamp = v.getUint32(4, true), hr = d[14];
+  if (timestamp < TS_MIN || timestamp > TS_MAX || hr === 0 || hr > 220) return null;
+  const rec = { timestamp, hr };
+  const n = d[15];
+  if (n > 0 && n <= 4 && d.length >= 16 + n * 2) {
+    const rr = [];
+    for (let i = 0; i < n; i++) { const ms = v.getUint16(16 + i * 2, true); if (ms >= 200 && ms <= 2500) rr.push(ms); }
+    if (rr.length) rec.rr_ms = rr;
+  }
+  if (d.length >= 45) {
+    const a = [33, 37, 41].map(o => v.getFloat32(o, true));
+    if (a.every(x => x > -100 && x < 100)) rec.accel = a.map(x => Math.round(x * 1e4) / 1e4);
+  }
+  return rec;
+}
+
+function hex(b) { return Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); }
+
+function parseEvent(pkt) {
+  const raw = pkt.data, t = pkt.cmd;
+  const r = { event_type: t, _raw: hex(raw) };
+  let p = new Uint8Array(0);
+  if (raw.length >= 9) { const pl = raw[7] | (raw[8] << 8); p = raw.subarray(9, 9 + pl); }
+  const v = dv(p);
+  if (t === EV.WRIST_ON) r.event = 'wrist_on';
+  else if (t === EV.WRIST_OFF) r.event = 'wrist_off';
+  else if (t === EV.DOUBLE_TAP) r.event = 'double_tap';
+  else if (t === EV.BATTERY_LEVEL && p.length >= 7) {
+    const pct = v.getUint32(1, true) / 10;
+    if (pct >= 0 && pct <= 100) {
+      r.event = 'battery'; r.battery_pct = Math.round(pct * 10) / 10;
+      const tc = v.getUint16(5, true) / 100;
+      if (tc >= 20 && tc <= 45) r.skin_temp_c = Math.round(tc * 100) / 100;
+    } else r.event = 'battery_unparsed';
+  } else if (t === EV.TEMPERATURE_LEVEL && p.length >= 2) {
+    const tc = v.getInt16(0, true) / 10;
+    if (tc >= 20 && tc <= 45) { r.event = 'temperature'; r.skin_temp_c = Math.round(tc * 100) / 100; }
+    else r.event = `unknown_${t}`;
+  } else if (t === EV.SENSOR_SNAPSHOT && p.length >= 12) {
+    r.event = 'sensor_snapshot';
+    const pct = v.getUint16(6, true) / 10;
+    if (pct >= 0 && pct <= 100) r.battery_pct = Math.round(pct * 10) / 10;
+  } else if (t === EV.STATE_MARKER_A || t === EV.STATE_MARKER_B || t === EV.STATE_MARKER_C) {
+    r.event = `state_marker_${t}`; r.payload_bits = hex(p);
+  } else r.event = `unknown_${t}`;
+  return r;
+}
+
+// Standard GATT Heart Rate Measurement (0x2A37)
+function parseHrMeasurement(dvw) {
+  const flags = dvw.getUint8(0);
+  let i = 1, hr;
+  if (flags & 1) { hr = dvw.getUint16(i, true); i += 2; } else { hr = dvw.getUint8(i); i += 1; }
+  if (flags & 0x08) i += 2;                 // energy expended
+  const rr = [];
+  if (flags & 0x10) for (; i + 1 < dvw.byteLength; i += 2) rr.push(Math.round(dvw.getUint16(i, true) * 1000 / 1024));
+  return { hr, rr };
+}
+
+// ---------------------------------------------------------------- storage (IndexedDB)
+let dbp = null;
+function db() {
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('whoop4', 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore('hr', { keyPath: 'ts' });
+      r.result.createObjectStore('events', { autoIncrement: true });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+const txDone = (tx) => new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = tx.onabort = () => rej(tx.error); });
+
+// Adds records, skipping ones already stored. Resolves to the number actually added.
+async function addRecords(recs) {
+  if (!recs.length) return 0;
+  const tx = (await db()).transaction('hr', 'readwrite'), st = tx.objectStore('hr');
+  let added = 0;
+  for (const r of recs) {
+    const q = st.add(r);
+    q.onsuccess = () => added++;
+    q.onerror = (e) => { e.preventDefault(); e.stopPropagation(); };   // duplicate key → skip
+  }
+  await txDone(tx);
+  return added;
+}
+async function addEvents(evs) {
+  if (!evs.length) return;
+  const tx = (await db()).transaction('events', 'readwrite'), st = tx.objectStore('events');
+  for (const e of evs) st.add(e);
+  await txDone(tx);
+}
+async function count(store) {
+  const q = (await db()).transaction(store).objectStore(store).count();
+  return new Promise((res, rej) => { q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+}
+async function download(store, filename) {
+  const parts = []; let chunk = [];
+  const tx = (await db()).transaction(store), q = tx.objectStore(store).openCursor();
+  await new Promise((res, rej) => {
+    q.onsuccess = () => {
+      const c = q.result;
+      if (!c) return res();
+      chunk.push(JSON.stringify(c.value));
+      if (chunk.length >= 5000) { parts.push(chunk.join('\n') + '\n'); chunk = []; }
+      c.continue();
+    };
+    q.onerror = () => rej(q.error);
+  });
+  if (chunk.length) parts.push(chunk.join('\n') + '\n');
+  if (!parts.length) { log(`${store}: nothing stored yet`); return; }
+  const url = URL.createObjectURL(new Blob(parts, { type: 'application/x-ndjson' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// ---------------------------------------------------------------- UI helpers
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fmtTs = (t) => new Date(t * 1000).toLocaleString();
+const LOG_MAX = 300; const logLines = [];
+function log(msg) {
+  const t = new Date().toTimeString().slice(0, 8);
+  logLines.push(`[${t}] ${msg}`);
+  if (logLines.length > LOG_MAX) logLines.shift();
+  const el = $('log'); el.textContent = logLines.join('\n'); el.scrollTop = el.scrollHeight;
+}
+async function refreshStored() {
+  try { $('stored').textContent = `${(await count('hr')).toLocaleString()} records`; }
+  catch (e) { $('stored').textContent = 'storage unavailable'; }
+}
+
+// ---------------------------------------------------------------- connection
+let device = null, cmdTo = null, connected = false, reconnecting = false;
+let writeChain = Promise.resolve();
+
+// Web Bluetooth rejects overlapping GATT operations, so writes are serialized.
+function send(bytes) {
+  const job = writeChain.then(() => cmdTo.properties.write ? cmdTo.writeValueWithResponse(bytes)
+                                                           : cmdTo.writeValueWithoutResponse(bytes));
+  writeChain = job.catch(() => {});
+  return job;
+}
+const sendCmd = (cmd, data) => send(frame(cmd, data));
+const setClock = () => sendCmd(CMD.SET_CLOCK, [...u32le(Math.floor(Date.now() / 1000)), 0x01]);  // 5 bytes — 4 is silently ignored
+
+function setUi() {
+  const busy = !!sync || clockCheck;
+  $('dot').className = 'dot' + (busy ? ' busy' : connected ? ' on' : '');
+  $('btnConnect').textContent = connected || reconnecting ? 'Disconnect' : 'Connect';
+  $('btnSync').disabled = !connected || busy;
+  $('btnClock').disabled = !connected || busy;
+  $('btnStop').disabled = !sync;
+  $('btnClear').disabled = busy;
+}
+
+async function pickDevice(acceptAll) {
+  const opts = acceptAll
+    ? { acceptAllDevices: true, optionalServices: [SVC, 'heart_rate'] }
+    : { filters: [{ services: [SVC] }, { namePrefix: 'WHOOP' }], optionalServices: [SVC, 'heart_rate'] };
+  device = await navigator.bluetooth.requestDevice(opts);
+  device.addEventListener('gattserverdisconnected', () => {
+    connected = false; setUi();
+    if (!reconnecting) log('Disconnected');
+  });
+  log(`Selected ${device.name || '(no name)'}`);
+  await connectGatt();
+}
+
+// Listeners from the previous connection. Chrome may hand back the same characteristic objects
+// on reconnect, so old listeners are removed first — otherwise every frame would be seen twice.
+let listeners = [];
+function listen(ch, fn) { ch.addEventListener('characteristicvaluechanged', fn); listeners.push([ch, fn]); }
+
+async function connectGatt() {
+  for (const [ch, fn] of listeners) ch.removeEventListener('characteristicvaluechanged', fn);
+  listeners = [];
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SVC);
+  cmdTo = await svc.getCharacteristic(CMD_TO);
+  writeChain = Promise.resolve();
+  for (const uuid of [CMD_FROM, DATA_FROM]) {
+    const ch = await svc.getCharacteristic(uuid);
+    const feed = assembler(onFrame);
+    listen(ch, (e) => {
+      const v = e.target.value; feed(new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice());
+    });
+    await ch.startNotifications();
+  }
+  try {
+    const hrs = await server.getPrimaryService('heart_rate');
+    const m = await hrs.getCharacteristic('heart_rate_measurement');
+    listen(m, (e) => onHr(parseHrMeasurement(e.target.value)));
+    await m.startNotifications();
+  } catch (e) { log(`Heart rate service unavailable: ${e.message}`); }
+  connected = true; setUi();
+  log('Connected');
+}
+
+async function reconnect() {
+  reconnecting = true;
+  try {
+    try { device.gatt.disconnect(); } catch {}
+    await sleep(2000);
+    for (let i = 1; ; i++) {
+      try { await connectGatt(); return; }
+      catch (e) { if (i >= 3) throw e; log(`Reconnect failed (${e.message}), retrying`); await sleep(2000); }
+    }
+  } finally { reconnecting = false; setUi(); }
+}
+
+// ---------------------------------------------------------------- live HR
+const hrHist = [], rrHist = [];   // hrHist: last N bpm; rrHist: [timeMs, rrMs]
+let hrSamples = 0;
+function onHr({ hr, rr }) {
+  const now = Date.now();
+  hrSamples++;
+  hrHist.push(hr); if (hrHist.length > 180) hrHist.shift();
+  for (const x of rr) rrHist.push([now, x]);
+  while (rrHist.length && now - rrHist[0][0] > 60000) rrHist.shift();
+  $('hr').textContent = hr;
+  $('samples').textContent = hrSamples;
+  if (rr.length) $('rr').textContent = `${rr[rr.length - 1]} ms`;
+  if (rrHist.length >= 3) {
+    let s = 0;
+    for (let i = 1; i < rrHist.length; i++) { const d = rrHist[i][1] - rrHist[i - 1][1]; s += d * d; }
+    $('rmssd').textContent = `${Math.round(Math.sqrt(s / (rrHist.length - 1)))} ms`;
+  }
+  drawSpark();
+}
+function drawSpark() {
+  const c = $('spark'), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  if (hrHist.length < 2) return;
+  const lo = Math.min(...hrHist) - 3, hi = Math.max(...hrHist) + 3;
+  g.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent');
+  g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
+  hrHist.forEach((v, i) => {
+    const x = (i / (hrHist.length - 1)) * w, y = h - ((v - lo) / (hi - lo)) * (h - 4) - 2;
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  });
+  g.stroke();
+}
+
+// ---------------------------------------------------------------- packet dispatch
+let sync = null;          // active sync state, see runSync()
+let clockCheck = false;
+let rtcWaiter = null;
+let consoleBuf = '';
+
+function onFrame(raw) {
+  const pkt = parseFrame(raw);
+  if (!pkt) return;
+  switch (pkt.type) {
+    case PT.HISTORICAL_DATA:
+      if (!sync) return;
+      sync.lastActivity = Date.now();
+      sync.packets++;
+      { const r = parseHistoricalRecord(pkt.data); if (r) sync.pending.push(toEntry(r)); }
+      break;
+    case PT.METADATA:
+      if (!sync) return;
+      sync.lastActivity = Date.now();
+      if (pkt.cmd === META.HISTORY_COMPLETE) sync.complete = true;
+      else if (pkt.cmd === META.HISTORY_END) sync.ends.push(pkt.data.slice());
+      break;
+    case PT.COMMAND_RESPONSE:
+      if (pkt.cmd === CMD.GET_CLOCK && pkt.data.length >= 6) onRtc(dv(pkt.data).getUint32(2, true));
+      break;
+    case PT.EVENT: {
+      const ev = parseEvent(pkt);
+      ev.received_at = new Date().toISOString();
+      if (sync) sync.events.push(ev); else addEvents([ev]).catch(() => {});
+      if (ev.battery_pct != null) log(`Battery ${ev.battery_pct}%` + (ev.skin_temp_c ? `, skin ${ev.skin_temp_c} °C` : ''));
+      else if (ev.event === 'wrist_on' || ev.event === 'wrist_off') log(ev.event.replace('_', ' '));
+      break;
+    }
+    case PT.CONSOLE_LOGS: {
+      const d = pkt.data.length >= 11 ? pkt.data.subarray(11) : pkt.data;
+      consoleBuf += new TextDecoder('ascii').decode(d).replace(/\0+$/, '');
+      const lines = consoleBuf.split('\n'); consoleBuf = lines.pop();
+      for (const l of lines) if (l.trim()) {
+        log(`band: ${l.trim()}`);
+        if (/RTC timestamp \d+ is invalid/.test(l)) log('⚠ Band clock is invalid — data is not being saved. Tap "Fix & check clock".');
+      }
+      break;
+    }
+  }
+}
+
+// Same key scheme as drain.py: second-resolution timestamp + .NNN counter for records in the same second.
+let lastTsUnix = 0, seqInSec = 0;
+function toEntry(r) {
+  if (r.timestamp === lastTsUnix) seqInSec++; else { lastTsUnix = r.timestamp; seqInSec = 0; }
+  const ts = new Date(r.timestamp * 1000).toISOString().slice(0, 19) + `.${String(seqInSec).padStart(3, '0')}+00:00`;
+  const e = { ts, hr: r.hr };
+  if (r.rr_ms) e.rr_ms = r.rr_ms;
+  if (r.accel) e.accel = r.accel;
+  e._unix = r.timestamp;
+  return e;
+}
+
+function onRtc(hw) {
+  const drift = hw - Math.floor(Date.now() / 1000);
+  const valid = hw > TS_MIN;
+  $('rtc').innerHTML = valid ? `<span class="ok">${fmtTs(hw)} ✓</span>` : `<span class="bad">${hw} — invalid ✗</span>`;
+  $('drift').textContent = valid ? `${drift >= 0 ? '+' : ''}${drift} s` : '--';
+  log(`RTC hw=${hw} ${valid ? `valid, drift ${drift}s` : 'INVALID — flash writes are failing'}`);
+  if (rtcWaiter) { rtcWaiter(hw); rtcWaiter = null; }
+}
+const waitRtc = (ms) => new Promise(res => { rtcWaiter = res; setTimeout(() => { if (rtcWaiter === res) { rtcWaiter = null; res(null); } }, ms); });
+
+// ---------------------------------------------------------------- clock fix
+async function fixClock() {
+  clockCheck = true; setUi();
+  try {
+    await setClock();
+    log('SET_CLOCK sent (5-byte payload)');
+    await sleep(300);
+    // GET_CLOCK only answers while a historical transmit is active, so open one briefly.
+    await sendCmd(CMD.SEND_HISTORICAL_DATA, [0x00]);
+    await sleep(800);
+    const w = waitRtc(4000);
+    await sendCmd(CMD.GET_CLOCK, [0x00]);
+    if ((await w) == null) log('No GET_CLOCK response — it will be checked again during sync');
+    await sendCmd(CMD.ABORT_HISTORICAL_TRANSMITS, []);
+  } catch (e) { log(`Clock fix failed: ${e.message}`); }
+  finally { clockCheck = false; setUi(); }
+}
+
+// ---------------------------------------------------------------- sync (drain.py)
+let wakeLock = null;
+async function runSync() {
+  const ack = $('optAck').checked;
+  const totals = { added: 0, latest: 0 };
+  let stopRequested = false;
+  sync = null;
+  const ctl = { stop: () => { stopRequested = true; } };
+  window._syncCtl = ctl;
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+  try { await navigator.storage?.persist?.(); } catch {}
+  $('syncProg').hidden = false; $('syncNew').textContent = '0';
+  log(`Sync start (${ack ? 'ACK batches' : 'read-only, no ACK'})`);
+
+  let pass = 0, emptyPasses = 0;
+  try {
+    while (pass < 30 && !stopRequested) {
+      pass++;
+      if (pass > 1) { $('syncStatus').textContent = 'reconnecting'; await reconnect(); }
+      const s = sync = { pending: [], events: [], ends: [], complete: false, packets: 0, batches: 0, added: 0, lastActivity: Date.now() };
+      setUi();
+      $('syncStatus').textContent = 'downloading';
+
+      await setClock();
+      await sleep(300);
+      await sendCmd(CMD.SEND_HISTORICAL_DATA, [0x00]);
+      await sleep(800);
+      const rtc = waitRtc(5000);
+      await sendCmd(CMD.GET_CLOCK, [0x00]);
+      rtc.then(hw => { if (hw != null && hw <= TS_MIN) log('⚠ RTC still invalid after SET_CLOCK'); });
+
+      const start = Date.now();
+      while (!s.complete && !stopRequested && connected) {
+        const end = s.ends.shift();
+        if (end) {
+          s.batches++;
+          await commit(s, totals);                     // persist BEFORE the ACK frees the data on the band
+          if (end.length >= 14 && ack) {
+            const trim = dv(end).getUint32(10, true);
+            await sendCmd(CMD.HISTORICAL_DATA_RESULT, [0x01, ...u32le(trim), 0, 0, 0, 0]);
+          }
+          continue;
+        }
+        if (Date.now() - s.lastActivity > 20000) break;
+        if (Date.now() - start > 600000) break;
+        if (s.pending.length > 2000) await commit(s, totals);
+        $('syncPass').textContent = `${pass} / ${s.batches} (${s.packets.toLocaleString()} pkts)`;
+        await sleep(50);
+      }
+      if (stopRequested && connected) { try { await sendCmd(CMD.ABORT_HISTORICAL_TRANSMITS, []); } catch {} }
+      await commit(s, totals);
+      $('syncPass').textContent = `${pass} / ${s.batches} (${s.packets.toLocaleString()} pkts)`;
+      log(`Pass ${pass}: +${s.added.toLocaleString()} new, ${s.batches} batches${s.complete ? ', HISTORY_COMPLETE' : ''}`);
+
+      if (s.complete) break;
+      if (!ack) break;                                  // without ACKs the band just resends the same batch
+      if (!connected) { log('Connection lost'); }
+      if (s.added === 0) { if (++emptyPasses >= 3) { log('3 empty passes — done'); break; } }
+      else emptyPasses = 0;
+    }
+    $('syncStatus').innerHTML = stopRequested ? 'stopped' : '<span class="ok">done</span>';
+  } catch (e) {
+    $('syncStatus').innerHTML = `<span class="bad">error</span>`;
+    log(`Sync error: ${e.message}`);
+  } finally {
+    sync = null;
+    $('syncProg').hidden = true;
+    try { await wakeLock?.release(); } catch {}
+    wakeLock = null;
+    log(`Sync finished: ${totals.added.toLocaleString()} new records`);
+    await refreshStored();
+    setUi();
+  }
+}
+
+async function commit(s, totals) {
+  const recs = s.pending.splice(0), evs = s.events.splice(0);
+  for (const r of recs) { if (r._unix > totals.latest) totals.latest = r._unix; delete r._unix; }
+  const n = await addRecords(recs);
+  await addEvents(evs);
+  s.added += n; totals.added += n;
+  $('syncNew').textContent = totals.added.toLocaleString();
+  if (totals.latest) $('syncLatest').textContent = fmtTs(totals.latest);
+  if (recs.length) refreshStored();
+}
+
+// ---------------------------------------------------------------- wiring
+async function onConnectClick(acceptAll) {
+  if (connected || reconnecting) {
+    window._syncCtl?.stop();
+    reconnecting = false;
+    try { device.gatt.disconnect(); } catch {}
+    return;
+  }
+  try {
+    if (device && !acceptAll) { log('Reconnecting…'); await connectGatt(); }
+    else await pickDevice(acceptAll);
+  } catch (e) {
+    if (e.name === 'NotFoundError') { log('No device selected'); if (device) device = null; }
+    else log(`Connect failed: ${e.message}`);
+    setUi();
+  }
+}
+
+$('btnConnect').onclick = () => onConnectClick(false);
+$('lnkAll').onclick = (e) => { e.preventDefault(); device = null; onConnectClick(true); };
+$('btnClock').onclick = fixClock;
+$('btnSync').onclick = runSync;
+$('btnStop').onclick = () => window._syncCtl?.stop();
+$('btnDlHr').onclick = () => download('hr', 'hr.jsonl').catch(e => log(`Download failed: ${e.message}`));
+$('btnDlEv').onclick = () => download('events', 'events.jsonl').catch(e => log(`Download failed: ${e.message}`));
+$('btnClear').onclick = async () => {
+  if (!confirm('Delete all records and events stored in this browser? Download them first if you need them.')) return;
+  const tx = (await db()).transaction(['hr', 'events'], 'readwrite');
+  tx.objectStore('hr').clear(); tx.objectStore('events').clear();
+  await txDone(tx); log('Local data cleared'); refreshStored();
+};
+
+(function init() {
+  if (!navigator.bluetooth) {
+    $('unsupported').style.display = 'block';
+    $('unsupportedMsg').textContent = !window.isSecureContext
+      ? 'This page must be opened over HTTPS (or from localhost) for Web Bluetooth to work.'
+      : 'This browser has no Web Bluetooth. On Android use Chrome (not Firefox, and not an in-app browser).';
+    $('btnConnect').disabled = true;
+  }
+  refreshStored();
+  setUi();
+})();
+</script>
+</body>
+</html>
