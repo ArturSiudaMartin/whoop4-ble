@@ -94,6 +94,7 @@
       <div><span class="muted">Samples</span><b id="samples">0</b></div>
     </div>
     <canvas id="spark"></canvas>
+    <p class="muted" style="margin:6px 0 0">Source: <span id="hrSrc">not connected</span></p>
   </section>
 
   <section>
@@ -155,7 +156,9 @@ const DATA_FROM = '61080005-8d6d-82b8-614a-1c8cb0f8dcc6';
 
 const PT = { COMMAND: 0x23, COMMAND_RESPONSE: 0x24, REALTIME_DATA: 0x28, REALTIME_RAW_DATA: 0x2B,
              HISTORICAL_DATA: 0x2F, EVENT: 0x30, METADATA: 0x31, CONSOLE_LOGS: 0x32 };
-const CMD = { SET_CLOCK: 0x0A, GET_CLOCK: 0x0B, ABORT_HISTORICAL_TRANSMITS: 0x14,
+// TOGGLE_REALTIME_HR / TOGGLE_GENERIC_HR_PROFILE follow the community RE (whoomp) numbering;
+// payload [0x01] = on. Without them the band only exposes HR when "HR broadcast" was enabled in the Whoop app.
+const CMD = { TOGGLE_REALTIME_HR: 0x03, TOGGLE_GENERIC_HR_PROFILE: 0x0E, SET_CLOCK: 0x0A, GET_CLOCK: 0x0B, ABORT_HISTORICAL_TRANSMITS: 0x14,
               SEND_HISTORICAL_DATA: 0x16, HISTORICAL_DATA_RESULT: 0x17 };
 const META = { HISTORY_START: 1, HISTORY_END: 2, HISTORY_COMPLETE: 3 };
 const EV = { BATTERY_LEVEL: 3, WRIST_ON: 9, WRIST_OFF: 10, DOUBLE_TAP: 14, TEMPERATURE_LEVEL: 17,
@@ -386,6 +389,8 @@ async function pickDevice(acceptAll) {
   device = await navigator.bluetooth.requestDevice(opts);
   device.addEventListener('gattserverdisconnected', () => {
     connected = false; setUi();
+    clearTimeout(hrWatchdog);
+    $('hrSrc').textContent = 'not connected';
     if (!reconnecting) log('Disconnected');
   });
   log(`Selected ${device.name || '(no name)'}`);
@@ -412,14 +417,42 @@ async function connectGatt() {
     });
     await ch.startNotifications();
   }
-  try {
-    const hrs = await server.getPrimaryService('heart_rate');
-    const m = await hrs.getCharacteristic('heart_rate_measurement');
-    listen(m, (e) => onHr(parseHrMeasurement(e.target.value)));
-    await m.startNotifications();
-  } catch (e) { log(`Heart rate service unavailable: ${e.message}`); }
   connected = true; setUi();
   log('Connected');
+  await startLiveHr(server);
+}
+
+// Live HR: ask the band to enable its standard HR profile + realtime HR stream, then subscribe to 0x2A37.
+// The 0x180D service may only appear after the toggle, so subscription is retried a few times.
+let hrSubscribed = false, hrWatchdog = null;
+async function subscribeHrService(server) {
+  const hrs = await server.getPrimaryService('heart_rate');
+  const m = await hrs.getCharacteristic('heart_rate_measurement');
+  listen(m, (e) => onHr(parseHrMeasurement(e.target.value), 'hrs'));
+  await m.startNotifications();
+  hrSubscribed = true;
+  log('Subscribed to Heart Rate service');
+}
+async function startLiveHr(server) {
+  hrSubscribed = false;
+  $('hrSrc').textContent = 'waiting for band…';
+  try {
+    await sendCmd(CMD.TOGGLE_GENERIC_HR_PROFILE, [0x01]);
+    await sendCmd(CMD.TOGGLE_REALTIME_HR, [0x01]);
+    log('Requested live HR stream from band');
+  } catch (e) { log(`HR enable command failed: ${e.message}`); }
+  for (let i = 0; i < 3 && !hrSubscribed && server.connected; i++) {
+    try { await subscribeHrService(server); }
+    catch (e) { if (i === 2) log(`Heart rate service unavailable: ${e.message}`); else await sleep(1500); }
+  }
+  clearTimeout(hrWatchdog);
+  const before = hrSamples;
+  hrWatchdog = setTimeout(() => {
+    if (!connected || hrSamples > before) return;
+    $('hrSrc').textContent = 'no data from band';
+    log('⚠ No heart rate received after 10 s. Check: band is on your wrist (snug, sensor on skin); ' +
+        'the official Whoop app is force-stopped; or enable "Heart Rate Broadcast" in the Whoop app once, then reconnect.');
+  }, 10000);
 }
 
 async function reconnect() {
@@ -436,10 +469,13 @@ async function reconnect() {
 
 // ---------------------------------------------------------------- live HR
 const hrHist = [], rrHist = [];   // hrHist: last N bpm; rrHist: [timeMs, rrMs]
-let hrSamples = 0;
-function onHr({ hr, rr }) {
+let hrSamples = 0, lastHrsAt = 0, rtLogged = 0;
+function onHr({ hr, rr }, src) {
   const now = Date.now();
+  if (src === 'hrs') lastHrsAt = now;
+  if (!hr) return;   // 0 bpm = band not reading (off wrist / no skin contact)
   hrSamples++;
+  $('hrSrc').textContent = src === 'hrs' ? 'Heart Rate service' : 'band realtime stream (experimental)';
   hrHist.push(hr); if (hrHist.length > 180) hrHist.shift();
   for (const x of rr) rrHist.push([now, x]);
   while (rrHist.length && now - rrHist[0][0] > 60000) rrHist.shift();
@@ -492,6 +528,14 @@ function onFrame(raw) {
       if (pkt.cmd === META.HISTORY_COMPLETE) sync.complete = true;
       else if (pkt.cmd === META.HISTORY_END) sync.ends.push(pkt.data.slice());
       break;
+    case PT.REALTIME_DATA: {
+      // Realtime HR stream from TOGGLE_REALTIME_HR. Byte layout is not fully confirmed for this
+      // firmware, so the first packets are logged raw, and it is only used when the standard HR service is silent.
+      if (rtLogged < 3) { rtLogged++; log(`realtime pkt: ${hex(pkt.data)}`); }
+      const hr = pkt.data.length > 5 ? pkt.data[5] : 0;
+      if (hr >= 30 && hr <= 220 && Date.now() - lastHrsAt > 3000) onHr({ hr, rr: [] }, 'rt');
+      break;
+    }
     case PT.COMMAND_RESPONSE:
       if (pkt.cmd === CMD.GET_CLOCK && pkt.data.length >= 6) onRtc(dv(pkt.data).getUint32(2, true));
       break;
