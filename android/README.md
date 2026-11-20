@@ -16,7 +16,7 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 | 3. Discovery & connection | ⏳ Next. Needs the phone for on-device testing |
 | 4. Live HR + RR ("Go live") | Not started |
 | 5. Historical sync | Not started |
-| 6. Kotlin ↔ Python decoder parity | Started: framing/CRC port with tests against Python output |
+| 6. Kotlin ↔ Python decoder parity | ✅ Done (see below) |
 | 7. Database | Not started (Room toolchain proven with a skeleton table) |
 | 8. Analytics | Not started |
 | 9. UI | Navigation + visual language only; screens show "Not yet available" |
@@ -36,6 +36,26 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 - `app`: dark theme, original icon and nav icons, bottom navigation (Home, Recovery, Sleep, Strain, Live) and a Device screen.
   **No screen shows numbers yet.** Every card says what it will show and in which phase.
 - Verified on the Android emulator (API 37): launches, navigates and has no crashes. No Bluetooth testing is possible on the emulator.
+
+### What Phase 6 contains
+
+- `core:protocol` ports every decoder from the Python reference: frame parsing (`Packet.parse`), HISTORICAL_DATA records,
+  EVENT packets (battery, skin temp, wrist on/off, sensor snapshot, state markers, unknown types kept as raw hex),
+  METADATA (HISTORY_START/END/COMPLETE, trim offset), GET_CLOCK responses, CONSOLE_LOGS text (including detection of the
+  "RTC timestamp … is invalid" message) and the standard 0x2A37 heart-rate measurement.
+- `Commands` builds **only** the five verified commands (SET_CLOCK with its 5-byte payload, GET_CLOCK,
+  SEND_HISTORICAL_DATA, ABORT_HISTORICAL_TRANSMITS, HISTORICAL_DATA_RESULT). There is no way to send arbitrary bytes.
+  The unverified 0x03/0x0E "enable HR" commands used by the web and legacy apps are deliberately **not** ported; Phase 4 decides on them.
+- **Parity tests:** `tools/golden.py` runs the Python reference (`packet.py`, and `reader.py`'s HR parser) over 360 frames:
+  4 real captures from `docs/SAMPLE_SESSION.md`, about 55 edge cases and a seeded random sweep of 300 records. It writes
+  `core/protocol/src/test/resources/golden/vectors.json`. `GoldenVectorsTest` checks that the Kotlin decoder matches it
+  field for field. Regenerate the vectors with `python -I tools/golden.py` whenever the Python code changes.
+- **Deliberate differences from Python:** accelerometer values keep the raw float32 (Python rounds to 4 decimals; tests
+  allow for that); RR from the HR service stays in raw 1/1024 s units with an `rrMs` view; malformed HR packets return
+  `null` where `reader.py` would raise.
+- **Bug found and fixed:** frame reassembly now validates the header CRC-8 before treating a notification as a new
+  frame. The SOF-only check in the web and legacy apps loses a frame when a continuation chunk starts with `0xAA`
+  (caught by the test that splits all vectors into 20-byte notifications). The band's header CRC-8 was verified on real captures.
 
 ### Known issues / notes
 
