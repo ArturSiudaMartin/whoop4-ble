@@ -1,5 +1,7 @@
 # Data captures — these belong to the user, never commit
 data/
+# …but not Bloop's source module of the same name
+!android/core/data/
 *.jsonl
 *.bin
 
