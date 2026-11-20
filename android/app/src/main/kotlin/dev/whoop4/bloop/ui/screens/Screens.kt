@@ -17,7 +17,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxHeight
+import dev.whoop4.bloop.app.BandService
+import dev.whoop4.bloop.app.WakeAlarm
+import dev.whoop4.bloop.data.SampleSource
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -128,6 +143,7 @@ fun SleepScreen() {
     val today = days.firstOrNull()?.takeIf { it.first == LocalDate.now() }?.second.orEmpty()
     Page {
         BigRing("Sleep performance", BloopColors.Sleep, today[MetricKeys.SLEEP_PERFORMANCE]?.value, today[MetricKeys.SLEEP_PERFORMANCE]?.let { "%.0f%%".format(it.value * 100) })
+        LastNightData(today[MetricKeys.SLEEP_END]?.value?.toLong())
         CardBox(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 MetricRow("Asleep", today[MetricKeys.SLEEP_ASLEEP_MS]) { fmtDuration(it) }
@@ -138,6 +154,7 @@ fun SleepScreen() {
                 Row2("Efficiency", if (asleep != null && awake != null && asleep + awake > 0) "%.0f%%".format(100 * asleep / (asleep + awake)) else "—")
             }
         }
+        WakeAlarmCard()
         History("Time asleep, last 14 nights", days.take(14), MetricKeys.SLEEP_ASLEEP_MS, BloopColors.Sleep, 10 * 3_600_000.0) { fmtDuration(it) }
         InfoCard("How sleep is detected", "From wrist motion (arm-angle method of van Hees et al.): the longest quiet period between 18:00 and 14:00, " +
             "with asleep vs awake from 5-minute stillness. Times with the band off your wrist are never counted as sleep. Sleep stages are not estimated: " +
@@ -171,6 +188,115 @@ fun StrainScreen() {
             "(21 × (1 − e^(−TRIMP/250))). Zones use your resting HR and your maximum HR (from your age, or the highest seen).")
     }
 }
+
+// ------------------------------------------------------------------ last night's data + wake alarm
+
+/**
+ * How much of last night (18:00 yesterday to 14:00 today) is on the phone: one bar per hour, the newest
+ * downloaded record, and a warning while the night is still being downloaded, so a short sleep caused by a
+ * partial sync is never mistaken for a short night.
+ */
+@Composable
+private fun LastNightData(sleepEndMs: Long?) {
+    val app = BloopApplication.from(LocalContext.current)
+    val address = app.band.status.collectAsState().value.address ?: return
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val from = today.minusDays(1).atTime(18, 0).atZone(zone).toInstant().toEpochMilli()
+    val to = today.atTime(14, 0).atZone(zone).toInstant().toEpochMilli()
+    val latestFlow = remember(address) { app.db.samples().observeLatest(address, SampleSource.HISTORICAL) }
+    val latest by latestFlow.collectAsState(initial = null)
+    val counts by produceState(emptyMap<Long, Int>(), address, latest) {
+        value = app.db.samples().hourlyCounts(address, SampleSource.HISTORICAL, from, to).associate { it.hour to it.n }
+    }
+    val reason = app.analytics.sleepReasons.collectAsState().value[today]
+
+    CardBox(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Last night's band data", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+                var h = from / 3_600_000
+                while (h < to / 3_600_000) {
+                    val f = ((counts[h] ?: 0) / 3600f).coerceIn(0f, 1f)
+                    Box(Modifier.weight(1f).height(36.dp).background(BloopColors.SurfaceHigh, RoundedCornerShape(2.dp)), contentAlignment = Alignment.BottomCenter) {
+                        if (f > 0) Box(Modifier.fillMaxWidth().fillMaxHeight(f.coerceAtLeast(0.05f)).background(BloopColors.Sleep, RoundedCornerShape(2.dp)))
+                    }
+                    h++
+                }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                Text("18:00", color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Text("14:00", color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
+            }
+            Text("Downloaded up to " + (latest?.let { fmtClockDay(it) } ?: "-") + ". Each bar is one hour of records.",
+                color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            val l = latest
+            val incomplete = l == null || (l < to && (sleepEndMs == null || l - sleepEndMs < 30 * 60_000L))
+            if (incomplete && (l ?: 0) < System.currentTimeMillis() - 30 * 60_000L) Text(
+                "Last night is not fully downloaded yet, so sleep may be missing or too short. Run Sync now on the Device screen " +
+                    "and let it finish: the band sends its oldest records first.",
+                color = BloopColors.Caution, style = MaterialTheme.typography.bodyMedium,
+            )
+            reason?.let { Text("No sleep found: $it.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WakeAlarmCard() {
+    val ctx = LocalContext.current
+    val app = BloopApplication.from(ctx)
+    val s = app.band.status.collectAsState().value
+    var enabled by remember { mutableStateOf(app.settings.alarmEnabled) }
+    var minutes by remember { mutableStateOf(app.settings.alarmMinutes ?: (7 * 60)) }
+    var picking by remember { mutableStateOf(false) }
+    fun save() {
+        app.settings.alarmEnabled = enabled; app.settings.alarmMinutes = minutes
+        WakeAlarm.reschedule(ctx)
+    }
+
+    CardBox(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Wake alarm", style = MaterialTheme.typography.titleMedium)
+                    Text("The band vibrates at this time every day", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                }
+                Switch(enabled, onCheckedChange = { enabled = it; save() }, enabled = s.address != null,
+                    colors = SwitchDefaults.colors(checkedTrackColor = BloopColors.Sleep))
+            }
+            TextButton({ picking = true }) {
+                Text("%02d:%02d".format(minutes / 60, minutes % 60), style = MaterialTheme.typography.displayLarge,
+                    color = if (enabled) BloopColors.OnSurface else BloopColors.Muted)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton("Test buzz", Modifier.weight(1f), enabled = s.address != null && !s.buzzing) {
+                    BandService.ensureRunning(ctx)
+                    app.scope.launch { app.band.buzz("test") }
+                }
+                SecondaryButton("Stop buzz", Modifier.weight(1f), enabled = s.address != null) { BandService.ensureRunning(ctx); app.band.stopBuzz() }
+            }
+            Text("Try Test buzz first: the buzz command comes from community research and has not been confirmed on your band yet. " +
+                "At alarm time Bloop connects to the band and makes it vibrate; the phone itself makes no sound. Keep Bluetooth on " +
+                "and the phone near you.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+
+    if (picking) {
+        val state = rememberTimePickerState(minutes / 60, minutes % 60, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = { TextButton({ minutes = state.hour * 60 + state.minute; enabled = true; picking = false; save() }) { Text("Set") } },
+            dismissButton = { TextButton({ picking = false }) { Text("Cancel") } },
+            text = { TimePicker(state) },
+            containerColor = BloopColors.Surface,
+        )
+    }
+}
+
+private fun fmtClockDay(epochMs: Long): String =
+    Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT))
 
 // ------------------------------------------------------------------ pieces
 

@@ -49,6 +49,10 @@ interface SampleDao {
     )
     suspend fun samplesBetween(device: String, source: Int, fromUtcMs: Long, toUtcMs: Long): List<HrSampleEntity>
 
+    /** Samples per UTC hour, to show how much of a night has been downloaded. */
+    @Query("SELECT tsUtcMs / 3600000 AS hour, COUNT(*) AS n FROM hr_sample WHERE deviceAddress = :device AND source = :source AND tsUtcMs >= :fromUtcMs AND tsUtcMs < :toUtcMs GROUP BY hour")
+    suspend fun hourlyCounts(device: String, source: Int, fromUtcMs: Long, toUtcMs: Long): List<HourCount>
+
     @Query("SELECT MIN(tsUtcMs) FROM hr_sample WHERE syncRunId = :runId")
     suspend fun earliestInRun(runId: Long): Long?
 
@@ -178,3 +182,5 @@ interface MetricDao {
     @Query("SELECT * FROM daily_summary WHERE deviceAddress = :device ORDER BY localDate DESC LIMIT :limit")
     fun observeDaily(device: String, limit: Int): Flow<List<DailySummaryEntity>>
 }
+
+data class HourCount(val hour: Long, val n: Int)

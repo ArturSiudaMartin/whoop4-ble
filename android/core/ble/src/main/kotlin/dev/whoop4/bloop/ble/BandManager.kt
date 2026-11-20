@@ -216,6 +216,47 @@ class BandManager(
 
     fun stopSync() { engine?.requestStop() }
 
+    // ------------------------------------------------------------------ haptics (wake alarm)
+
+    /**
+     * Connects (retrying until [deadlineMs]) and sends RUN_ALARM so the band vibrates. Returns true once the
+     * command was written. Disconnects afterwards unless a live session or sync is using the link.
+     */
+    suspend fun buzz(reason: String, deadlineMs: Long = System.currentTimeMillis() + 60_000): Boolean {
+        if (_status.value.address == null) { log.w("buzz ($reason): no band selected"); return false }
+        _status.update { it.copy(buzzing = true) }
+        try {
+            while (true) {
+                try {
+                    ensureConnected()
+                    link.write(ExperimentalCommands.runAlarm().also { log.tx("EXPERIMENTAL RUN_ALARM ($reason)", it) })
+                    log.i("buzz ($reason): RUN_ALARM written")
+                    return true
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    log.w("buzz ($reason): ${e.message}")
+                    if (System.currentTimeMillis() > deadlineMs) return false
+                    delay(5_000)
+                }
+            }
+        } finally {
+            delay(3_000)   // let the command and any response through before disconnecting
+            _status.update { it.copy(buzzing = false) }
+            if (!_status.value.liveRequested && !_status.value.syncing) runCatching { link.disconnect() }
+        }
+    }
+
+    fun stopBuzz() {
+        scope.launch {
+            runCatching {
+                ensureConnected()
+                link.write(ExperimentalCommands.stopHaptics().also { log.tx("EXPERIMENTAL STOP_HAPTICS", it) })
+                delay(2_000)
+            }.onFailure { log.w("stop buzz: ${it.message}") }
+            if (!_status.value.liveRequested && !_status.value.syncing && !_status.value.buzzing) runCatching { link.disconnect() }
+        }
+    }
+
     private companion object {
         const val STREAM_FALLBACK_MS = 5_000L
     }

@@ -42,6 +42,9 @@ object SleepDetector {
     private const val MAX_GAP_MS = 60 * 60_000L
     private const val SIB_DEG = 5.0
     private const val SIB_EPOCHS = 60           // 5 min
+    /** Data gaps up to this long between quiet/asleep epochs are bridged (bands drop records now and then). */
+    private const val MAX_BRIDGE_EPOCHS = 180   // 15 min
+    private const val MIN_ROLL_VALUES = 10
     const val MIN_SLEEP_PERIOD_MS = 2 * 60 * 60_000L
 
     fun detect(hr: List<HrPoint>, fromMs: Long, toMs: Long): Metric<SleepResult> {
@@ -65,19 +68,20 @@ object SleepDetector {
 
         val diff = DoubleArray(n) { i -> if (i == 0) Double.NaN else abs(angle[i] - angle[i - 1]) }
 
-        // 5-minute rolling median of the angle change (needs half the window present).
+        // 5-minute rolling median of the angle change (needs [MIN_ROLL_VALUES] values in the window).
         val rolled = DoubleArray(n) { Double.NaN }
         for (i in 0 until n) {
             val lo = maxOf(0, i - ROLL_EPOCHS / 2); val hi = minOf(n, i + ROLL_EPOCHS / 2)
             val vals = (lo until hi).map { diff[it] }.filter { !it.isNaN() }
-            if (vals.size >= ROLL_EPOCHS / 2) rolled[i] = median(vals)
+            if (vals.size >= MIN_ROLL_VALUES) rolled[i] = median(vals)
         }
         val valid = rolled.filter { !it.isNaN() }
         if (valid.isEmpty()) return Metric.Missing("not enough continuous motion data")
         val threshold = (percentile(valid, 10.0) * 15).coerceIn(0.13, 0.50)
 
         // Quiet blocks > 30 min, joined across gaps < 60 min; the longest is the sleep period.
-        val blocks = runs(n) { !rolled[it].isNaN() && rolled[it] < threshold }
+        val quiet = bridgeGaps(BooleanArray(n) { !rolled[it].isNaN() && rolled[it] < threshold }, BooleanArray(n) { rolled[it].isNaN() })
+        val blocks = runs(n) { quiet[it] }
             .filter { (a, b) -> (b - a) * EPOCH_MS > MIN_BLOCK_MS }
         if (blocks.isEmpty()) return Metric.Missing("no sustained period of rest found")
         val joined = mutableListOf(blocks.first())
@@ -94,6 +98,9 @@ object SleepDetector {
         for ((a, b) in runs(n) { it in spStart until spEnd && !diff[it].isNaN() && diff[it] <= SIB_DEG }) {
             if (b - a >= SIB_EPOCHS) for (i in a until b) asleep[i] = true
         }
+        // Missing data between two sleep bouts is still sleep (the band dropped records, the wearer didn't wake).
+        val bridged = bridgeGaps(asleep, BooleanArray(n) { diff[it].isNaN() })
+        for (k in spStart until spEnd) asleep[k] = bridged[k]
         val segments = mutableListOf<SleepSegment>()
         var i = spStart
         while (i < spEnd) {
@@ -114,6 +121,20 @@ object SleepDetector {
         val result = SleepResult(start, end, asleepMs, (end - start) - asleepMs, segments, coverage)
         // Wrist actigraphy agrees well with PSG on sleep/wake for the sleep period; confidence tracks data coverage.
         return Metric.Estimated(result, METHOD, (0.8 * coverage).coerceIn(0.0, 1.0))
+    }
+
+    /** Sets runs of [missing] epochs (≤ [MAX_BRIDGE_EPOCHS]) to true when [flags] is true on both sides. */
+    private fun bridgeGaps(flags: BooleanArray, missing: BooleanArray): BooleanArray {
+        val out = flags.copyOf()
+        var i = 0
+        while (i < flags.size) {
+            if (!missing[i]) { i++; continue }
+            var j = i
+            while (j < flags.size && missing[j]) j++
+            if (i > 0 && j < flags.size && flags[i - 1] && flags[j] && j - i <= MAX_BRIDGE_EPOCHS) for (k in i until j) out[k] = true
+            i = j
+        }
+        return out
     }
 
     /** Maximal runs [a, b) of consecutive indices where [pred] holds. */

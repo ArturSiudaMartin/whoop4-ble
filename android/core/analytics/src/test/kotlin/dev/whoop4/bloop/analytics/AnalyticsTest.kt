@@ -26,6 +26,9 @@ private class SyntheticNight(
     val artefactEvery: Int = 0,
     val wristOffFrom: Long? = null,
     val wristOffTo: Long? = null,
+    /** Drop records for [dropMinutes] minutes out of every [dropEvery] minutes (band skipping records). */
+    val dropEvery: Int = 0,
+    val dropMinutes: Int = 0,
 ) {
     val from = 0L
     val to = 20 * HOUR
@@ -44,7 +47,8 @@ private class SyntheticNight(
         var still = Triple(0.2f, -0.3f, 0.93f)
         while (t < to) {
             val asleep = t in sleepStart until sleepEnd && t !in wakeStart until wakeEnd
-            val off = wristOffFrom != null && t in wristOffFrom until wristOffTo!!
+            val dropped = dropEvery > 0 && (t / MIN) % dropEvery < dropMinutes
+            val off = (wristOffFrom != null && t in wristOffFrom until wristOffTo!!) || dropped
             if (!off) {
                 val h: Int
                 val acc: Triple<Float, Float, Float>
@@ -141,6 +145,23 @@ class SleepTest {
         assertTrue("asleep ${s.asleepMs / MIN} min vs true ${trueAsleep / MIN}", abs(s.asleepMs - trueAsleep) <= 30 * MIN)
         assertTrue("the 03:00 awakening is detected", s.segments.any { it.state == SleepState.WAKE && it.startMs < n.wakeEnd && it.endMs > n.wakeStart })
         assertTrue(s.coverage > 0.99)
+    }
+
+    @Test fun survivesRegularDataGaps() {
+        // 4 minutes missing out of every 20 (20 % of the night): the night must not fall apart into short pieces.
+        val n = SyntheticNight(dropEvery = 20, dropMinutes = 4)
+        val s = (SleepDetector.detect(n.hr, n.from, n.to) as Metric.Estimated).value
+        assertTrue("onset ${(s.startMs - n.sleepStart) / MIN} min off", abs(s.startMs - n.sleepStart) <= 25 * MIN)
+        assertTrue("wake ${(s.endMs - n.sleepEnd) / MIN} min off", abs(s.endMs - n.sleepEnd) <= 25 * MIN)
+        val trueAsleep = (n.sleepEnd - n.sleepStart) - (n.wakeEnd - n.wakeStart)
+        assertTrue("asleep ${s.asleepMs / MIN} min vs ${trueAsleep / MIN}", abs(s.asleepMs - trueAsleep) <= 40 * MIN)
+    }
+
+    @Test fun nightCutShortByMissingDownload() {
+        // Only the first 2 h of sleep downloaded so far: a short sleep, not a full night (the UI flags it as incomplete).
+        val n = SyntheticNight(wristOffFrom = 7 * HOUR, wristOffTo = 20 * HOUR)
+        val s = SleepDetector.detect(n.hr, n.from, n.to)
+        assertTrue(s is Metric.Missing || (s.valueOrNull!!.endMs <= 7 * HOUR))
     }
 
     @Test fun wristOffIsNotSleep() {

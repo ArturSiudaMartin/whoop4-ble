@@ -16,4 +16,15 @@ object ExperimentalCommands {
 
     fun enableGenericHrProfile(): ByteArray = Framing.frame(PacketType.COMMAND, 0, TOGGLE_GENERIC_HR_PROFILE, byteArrayOf(0x01))
     fun enableRealtimeHr(): ByteArray = Framing.frame(PacketType.COMMAND, 0, TOGGLE_REALTIME_HR, byteArrayOf(0x01))
+
+    // ---- Haptics (wake alarm). Numbers from the community whoomp project's CommandNumber table
+    // (github.com/k0n5n/whoomp packet.js: RUN_ALARM = 68, STOP_HAPTICS = 122), whose web page sends
+    // RUN_ALARM with payload [0x00] to make the strap buzz. Consistent with this repo's own probing:
+    // 0x44 answered `000101000000000000` and a vibration was observed in the 0x43-0x4D range (docs/PROTOCOL.md).
+    // Bloop sends them only when the user taps "Test buzz" or their alarm fires; results are logged.
+    const val RUN_ALARM = 0x44
+    const val STOP_HAPTICS = 0x7A
+
+    fun runAlarm(): ByteArray = Framing.frame(PacketType.COMMAND, 0, RUN_ALARM, byteArrayOf(0x00))
+    fun stopHaptics(): ByteArray = Framing.frame(PacketType.COMMAND, 0, STOP_HAPTICS, byteArrayOf(0x00))
 }

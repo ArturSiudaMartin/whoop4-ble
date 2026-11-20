@@ -50,6 +50,7 @@ class BloopApplication : Application() {
         }
         settings.bandAddress?.let { band.selectBand(it, settings.bandName) }
         scheduleAnalytics()
+        WakeAlarm.reschedule(this)
     }
 
     /** Why the previous process ended (killed by the system, crash, user swipe…), from Android 11 on. */
@@ -149,6 +150,13 @@ class Settings(c: Context) {
     var sleepNeedHours: Double
         get() = p.getFloat("sleepNeedHours", 8f).toDouble()
         set(v) = p.edit().putFloat("sleepNeedHours", v.toFloat()).apply()
+    var alarmEnabled: Boolean
+        get() = p.getBoolean("alarmEnabled", false)
+        set(v) = p.edit().putBoolean("alarmEnabled", v).apply()
+    /** Wake alarm time as minutes after midnight (local), or null if never set. */
+    var alarmMinutes: Int?
+        get() = p.getInt("alarmMinutes", -1).takeIf { it >= 0 }
+        set(v) = p.edit().putInt("alarmMinutes", v ?: -1).apply()
     var analyticsBackfilled: Boolean
         get() = p.getBoolean("analyticsBackfilled", false)
         set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()

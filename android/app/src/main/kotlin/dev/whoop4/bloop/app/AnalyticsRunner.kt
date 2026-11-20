@@ -56,6 +56,9 @@ object MetricKeys {
  */
 class AnalyticsRunner(private val db: BloopDatabase, private val settings: Settings, private val log: DebugLog) {
     private val lock = Mutex()
+    private val _sleepReasons = kotlinx.coroutines.flow.MutableStateFlow<Map<LocalDate, String>>(emptyMap())
+    /** Why no sleep was found for a day (from the last computation), for the Sleep screen. */
+    val sleepReasons: kotlinx.coroutines.flow.StateFlow<Map<LocalDate, String>> = _sleepReasons
     private val zone: ZoneId get() = ZoneId.systemDefault()
 
     /** Recomputes from the day containing [fromUtcMs] through today (at most [MAX_DAYS] days). */
@@ -83,6 +86,7 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         val hr = samples.map { HrPoint(it.tsUtcMs, it.hr, it.accelX, it.accelY, it.accelZ) }
         val rr = db.samples().rrForRange(device, SampleSource.HISTORICAL, nightFrom, nightTo - 1).map { RrPoint(it.sampleTsUtcMs, it.rrMs) }
 
+        _sleepReasons.value = _sleepReasons.value - day
         val values = mutableListOf<MetricValueEntity>()
         fun put(key: String, value: Double, kind: String, method: String, confidence: Double?) {
             values += MetricValueEntity(
@@ -100,6 +104,16 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         // ---- night
         val night = NightAnalyzer.analyze(hr, rr, nightFrom, nightTo, (settings.sleepNeedHours * 3_600_000).toLong())
         val sleep = night.sleep
+        val nightSamples = hr.count { it.tsMs < nightTo }
+        val fmt = { ms: Long -> Instant.ofEpochMilli(ms).atZone(zone).toLocalTime().withSecond(0).withNano(0).toString() }
+        log.i("analytics $day: $nightSamples samples 18:00–14:00" +
+            (hr.lastOrNull()?.let { " (last ${fmt(it.tsMs)})" } ?: "") + ", sleep " + when (sleep) {
+                is Metric.Estimated -> "${fmt(sleep.value.startMs)}–${fmt(sleep.value.endMs)}, asleep ${sleep.value.asleepMs / 60_000} min, coverage ${"%.0f".format(sleep.value.coverage * 100)}%"
+                is Metric.Missing -> "none: ${sleep.reason}"
+                else -> "?"
+            } + ", HRV ${night.hrv.valueOrNull?.rmssdMs?.let { "%.0f ms".format(it) } ?: (night.hrv as? Metric.Missing)?.reason}" +
+            ", RHR ${night.restingHr.valueOrNull?.bpm?.let { "%.0f".format(it) } ?: (night.restingHr as? Metric.Missing)?.reason}")
+        if (sleep is Metric.Missing) _sleepReasons.value = _sleepReasons.value + (day to sleep.reason)
         if (sleep is Metric.Estimated) {
             val s = sleep.value
             put(MetricKeys.SLEEP_START, s.startMs.toDouble(), MetricKind.ESTIMATED, sleep.method, sleep.confidence)

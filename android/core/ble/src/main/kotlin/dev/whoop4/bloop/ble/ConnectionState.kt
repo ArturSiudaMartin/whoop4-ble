@@ -18,8 +18,10 @@ data class BandStatus(
     val lastHrAtUtcMs: Long? = null,
     val lastRrMs: Double? = null,
     val syncing: Boolean = false,
+    /** A wake alarm / test buzz is being delivered. */
+    val buzzing: Boolean = false,
     val sync: SyncProgress? = null,
 ) {
     /** True while Bloop needs to keep running in the background (connected, live or syncing). */
-    val active: Boolean get() = liveRequested || syncing || connection == ConnectionState.CONNECTING || connection == ConnectionState.CONNECTED
+    val active: Boolean get() = liveRequested || syncing || buzzing || connection == ConnectionState.CONNECTING || connection == ConnectionState.CONNECTED
 }
