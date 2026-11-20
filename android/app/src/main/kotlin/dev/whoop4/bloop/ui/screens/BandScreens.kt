@@ -204,6 +204,7 @@ fun DeviceScreen() {
     val s by app.band.status.collectAsStateWithLifecycle()
     val (granted, request) = rememberBluetoothPermission()
     var scanning by remember { mutableStateOf(false) }
+    var confirmStop by remember { mutableStateOf(false) }
     var readOnly by remember { mutableStateOf(app.settings.readOnlySync) }
     val devices by app.db.devices().observeAll().collectAsStateWithLifecycle(emptyList())
     val device = devices.firstOrNull { it.address == s.address }
@@ -260,7 +261,7 @@ fun DeviceScreen() {
                     Switch(readOnly, onCheckedChange = { readOnly = it; app.settings.readOnlySync = it }, enabled = !s.syncing,
                         colors = SwitchDefaults.colors(checkedTrackColor = BloopColors.Recovery))
                 }
-                if (s.syncing) PrimaryButton("Stop sync", color = BloopColors.Strain) { app.band.stopSync() }
+                if (s.syncing) PrimaryButton("Stop sync", color = BloopColors.Strain) { confirmStop = true }
                 else PrimaryButton("Sync now", enabled = granted && s.address != null) { act(ctx) { it.band.sync(readOnly) } }
                 if (runs.isNotEmpty()) {
                     Text("History", color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
@@ -274,6 +275,15 @@ fun DeviceScreen() {
     }
 
     if (scanning) ScanDialog(app, onDismiss = { scanning = false })
+    // "Stop sync" appears where "Sync now" was, so a double tap would stop a sync that just started.
+    if (confirmStop) AlertDialog(
+        onDismissRequest = { confirmStop = false },
+        title = { Text("Stop the sync?") },
+        text = { Text("Everything downloaded so far is kept. The next sync continues where this one stopped.") },
+        confirmButton = { TextButton({ confirmStop = false; app.band.stopSync() }) { Text("Stop sync", color = BloopColors.Strain) } },
+        dismissButton = { TextButton({ confirmStop = false }) { Text("Keep syncing") } },
+        containerColor = BloopColors.Surface,
+    )
 }
 
 @Composable

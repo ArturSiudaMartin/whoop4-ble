@@ -13,9 +13,9 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 |---|---|
 | 1. Audit & plan | ✅ Done (`docs/ANDROID_APP_PLAN.md`) |
 | 2. Project setup & APK build | ✅ Done (see below) |
-| 3. Discovery & connection | 🟡 Built, **not yet tested on a real band** |
-| 4. Live HR + RR ("Go live") | 🟡 Built, **not yet tested on a real band** |
-| 5. Historical sync | 🟡 Built and tested against a simulated band, **not yet on a real band** |
+| 3. Discovery & connection | ✅ Works on a real band (Samsung A16, Android 16) |
+| 4. Live HR + RR ("Go live") | ✅ Live HR seen on a real band; RR via the Heart Rate service still to confirm |
+| 5. Historical sync | ✅ Real band: ~16 h of history in ~8 min, resumed correctly after the app was killed; HISTORY_COMPLETE not yet reached |
 | 6. Kotlin ↔ Python decoder parity | ✅ Done (see below) |
 | 7. Database | ✅ Done (see below) |
 | 8. Analytics | Not started |
@@ -111,6 +111,22 @@ Tested remotely: the user installs a build, tries it, and shares the **debug log
     progress, sync history, and the debug log with Share and Clear.
   - Live screen: Go live / Stop, HR, last RR, source, a 3-minute sparkline, and an explanation when no HR arrives.
 - **Not yet:** scheduled background syncs every few hours (Phase 10). Syncs are started by hand for now.
+
+### Real-band findings (v0.2.1, from the first shared debug log, 2026-11-20)
+
+- **Sync works.** ~2 batches/s, ~50 records per batch; a pass that hits the 10-minute cap reconnects and
+  continues. After the process died mid-sync, the next sync resumed at the next trim (19843 → 19848).
+- Records with HR = 0 (band off the wrist) are rejected exactly as `packet.py` does; a stretch of them
+  explains a pass with many batches but few new samples. Their raw frames are still kept in `raw_packet`.
+- **REALTIME_DATA (0x28)** streams once a second after TOGGLE_REALTIME_HR, and keeps streaming on later
+  connections. Layout decoded in `RealtimeData.kt` (Unix time + HR byte); Live uses it when the
+  standard Heart Rate service is silent, labelled "band realtime stream". RR is not in it.
+- The band's console log repeats link chatter ("Nordic Neg MTUs…") many times a second and arrives with
+  single characters missing. v0.2.1 counts that noise instead of logging it, matches the RTC-invalid
+  message tolerantly, and summarises batches every 100 instead of logging each one (the v0.2.0 log
+  rotated away its own start).
+- v0.2.1 records crashes and the previous process's exit reason in the debug log, and asks before
+  stopping a sync (the button replaces "Sync now", so a double tap stopped one).
 
 ### Known issues / notes
 

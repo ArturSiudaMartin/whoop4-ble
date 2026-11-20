@@ -156,6 +156,15 @@ class SyncEngine(
         val collector = launch(start = CoroutineStart.UNDISPATCHED) { link.frames.collect { inbox.send(it) } }
         val pending = ArrayList<ByteArray>()
         var historicalLogged = 0
+        // Log volume control: a full day is ~1500 batches, and the band's console repeats link chatter many
+        // times a second. Verbose for the first batches, then a summary line every SUMMARY_EVERY batches.
+        var batchesThisPass = 0
+        var eventsLogged = 0
+        var consoleLogged = 0
+        var consoleNoise = 0
+        var otherLogged = 0
+        var lastConsole = ""
+        fun verbose() = batchesThisPass < VERBOSE_BATCHES
 
         suspend fun commit() {
             if (pending.isEmpty()) return
@@ -166,8 +175,8 @@ class SyncEngine(
         }
 
         /** Returns false if the link dropped (the pass then ends normally); other write errors propagate. */
-        suspend fun send(what: String, frame: ByteArray): Boolean {
-            log.tx(what, frame)
+        suspend fun send(what: String, frame: ByteArray, quiet: Boolean = false): Boolean {
+            if (!quiet) log.tx(what, frame)
             return try { link.write(frame); true } catch (e: Exception) {
                 if (link.isConnected) throw e
                 log.w("write $what failed, link lost: ${e.message}"); false
@@ -205,16 +214,22 @@ class SyncEngine(
                     p = p.copy(packets = p.packets + 1, latestRecordUtcS = maxOf(p.latestRecordUtcS ?: 0, r?.timestamp ?: 0).takeIf { it > 0 })
                     if (pending.size >= config.commitEveryFrames) commit()   // bounded memory; no ACK without HISTORY_END
                 }
-                PacketType.EVENT -> { pending.add(f); log.rx("EVENT ${f.hex()}") }
+                PacketType.EVENT -> { pending.add(f); if (eventsLogged++ < MAX_EVENT_LINES) log.rx("EVENT ${f.hex()}") }
                 PacketType.METADATA -> {
                     pending.add(f)
                     val m = MetadataParser.parse(pkt)!!
-                    log.rx("METADATA kind=${m.kind} start=${m.startOffset} end=${m.endOffset} trim=${m.trim}")
+                    if (verbose()) log.rx("METADATA kind=${m.kind} start=${m.startOffset} end=${m.endOffset} trim=${m.trim}")
                     when (m.kind) {
                         MetadataType.HISTORY_END -> {
                             commit()   // durable BEFORE the ACK lets the band discard the batch
                             p = p.copy(batches = p.batches + 1, lastTrim = m.trim ?: p.lastTrim)
-                            if (!readOnly && m.trim != null) send("HISTORICAL_DATA_RESULT(trim=${m.trim})", Commands.historicalDataResult(m.trim!!))
+                            if (!readOnly && m.trim != null) send("HISTORICAL_DATA_RESULT(trim=${m.trim})", Commands.historicalDataResult(m.trim!!), quiet = !verbose())
+                            batchesThisPass++
+                            if (batchesThisPass % SUMMARY_EVERY == 0) log.i(
+                                "pass ${p.pass}: $batchesThisPass batches, trim=${p.lastTrim}, ${p.packets} records received, " +
+                                    "${p.newSamples} new samples, newest record ${p.latestRecordUtcS?.let { java.time.Instant.ofEpochSecond(it) } ?: "-"}" +
+                                    ", console lines skipped: $consoleNoise",
+                            )
                         }
                         MetadataType.HISTORY_COMPLETE -> { commit(); p = p.copy(complete = true) }
                     }
@@ -222,7 +237,7 @@ class SyncEngine(
                     if (p.complete) break
                 }
                 PacketType.COMMAND_RESPONSE -> {
-                    log.rx("RESPONSE cmd=0x%02x %s".format(pkt.cmd, pkt.data.hex()))
+                    if (verbose() || pkt.cmd != 0x17) log.rx("RESPONSE cmd=0x%02x %s".format(pkt.cmd, pkt.data.hex()))
                     ClockParser.parse(pkt)?.hwRtc?.let { rtc -> p = onClock(p, rtc) }
                 }
                 PacketType.CONSOLE_LOGS -> {
@@ -230,14 +245,17 @@ class SyncEngine(
                     val parts = consoleBuf.split('\n')
                     consoleBuf = parts.last()
                     for (line in parts.dropLast(1)) if (line.isNotBlank()) {
-                        log.log("band", line.trim())
+                        val t = line.trim()
+                        if (ConsoleParser.isLinkNoise(t)) consoleNoise++
+                        else if (t != lastConsole && consoleLogged++ < MAX_CONSOLE_LINES) log.log("band", t)
+                        lastConsole = t
                         ConsoleParser.invalidRtcValue(line)?.let {
                             log.w("band reports an INVALID RTC ($it): flash writes are failing until SET_CLOCK takes effect")
                             p = p.copy(rtcInvalid = true)
                         }
                     }
                 }
-                else -> log.rx("type=0x%02x cmd=0x%02x %s".format(pkt.type, pkt.cmd, pkt.data.hex()))
+                else -> if (otherLogged++ < 5) log.rx("type=0x%02x cmd=0x%02x %s".format(pkt.type, pkt.cmd, pkt.data.hex()))
             }
         }
         if (stopRequested && link.isConnected) runCatching { send("ABORT_HISTORICAL_TRANSMITS", Commands.abortHistoricalTransmits()) }
@@ -258,5 +276,12 @@ class SyncEngine(
         if (valid) store.saveHwRtc(rtc, now)
         return p.copy(hwRtc = rtc, rtcDriftS = if (valid) drift else null, rtcInvalid = p.rtcInvalid || !valid,
             rebootDetected = p.rebootDetected || reboot)
+    }
+
+    private companion object {
+        const val VERBOSE_BATCHES = 5
+        const val SUMMARY_EVERY = 100
+        const val MAX_EVENT_LINES = 40
+        const val MAX_CONSOLE_LINES = 150
     }
 }

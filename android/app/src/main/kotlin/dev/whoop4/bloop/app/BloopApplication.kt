@@ -29,6 +29,13 @@ class BloopApplication : Application() {
         ingest = IngestRepository(db)
         log = DebugLog(File(filesDir, "logs/debug.log"))
         log.i("Bloop ${packageManager.getPackageInfo(packageName, 0).versionName} started")
+        // A crash would otherwise leave no trace in the shareable log (a sync on 2026-11-20 just stopped).
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching { log.w("CRASH in ${t.name}: ${e.stackTraceToString().take(4000)}") }
+            previous?.uncaughtException(t, e)
+        }
+        logLastExit()
         band = BandManager(this, log, scope) { address -> RoomSyncStore(db, ingest, address) }
 
         scope.launch { db.syncRuns().markInterrupted(System.currentTimeMillis()).takeIf { it > 0 }?.let { log.w("$it interrupted sync run(s) marked PARTIAL") } }
@@ -40,6 +47,32 @@ class BloopApplication : Application() {
             }
         }
         settings.bandAddress?.let { band.selectBand(it, settings.bandName) }
+    }
+
+    /** Why the previous process ended (killed by the system, crash, user swipe…), from Android 11 on. */
+    private fun logLastExit() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return
+        runCatching {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am.getHistoricalProcessExitReasons(packageName, 0, 1).firstOrNull()?.let { x ->
+                log.i("previous exit: reason=${exitReason(x.reason)} importance=${x.importance} at=${java.time.Instant.ofEpochMilli(x.timestamp)} ${x.description ?: ""}")
+            }
+        }
+    }
+
+    private fun exitReason(r: Int) = when (r) {
+        android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
+        android.app.ApplicationExitInfo.REASON_CRASH -> "CRASH"
+        android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE"
+        android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF"
+        android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
+        android.app.ApplicationExitInfo.REASON_OTHER -> "OTHER"
+        android.app.ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
+        android.app.ApplicationExitInfo.REASON_USER_REQUESTED -> "USER_REQUESTED (force stop / swipe away)"
+        android.app.ApplicationExitInfo.REASON_USER_STOPPED -> "USER_STOPPED"
+        android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "EXCESSIVE_RESOURCE_USAGE"
+        android.app.ApplicationExitInfo.REASON_FREEZER -> "FREEZER"
+        else -> "code $r"
     }
 
     fun chooseBand(address: String, name: String?) {

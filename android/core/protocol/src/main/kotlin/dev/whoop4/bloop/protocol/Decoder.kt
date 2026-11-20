@@ -209,8 +209,29 @@ object ConsoleParser {
         return s.trimEnd('\u0000')
     }
 
-    /** The firmware's "flash writes are failing because the RTC is invalid" message, if present. */
-    fun invalidRtcValue(line: String): Long? = RTC_INVALID.find(line)?.groupValues?.get(1)?.toLongOrNull()
+    private val DIGITS = Regex("""\d{6,}""")
+
+    /**
+     * The firmware's "flash writes are failing because the RTC is invalid" message, if present.
+     * Real console text arrives with single characters missing (e.g. "Nordic Neg MTs"), so the words
+     * are matched allowing one dropped character each.
+     */
+    fun invalidRtcValue(line: String): Long? {
+        RTC_INVALID.find(line)?.let { return it.groupValues[1].toLongOrNull() }
+        if (!fuzzyContains(line, "timestamp") || !fuzzyContains(line, "invalid")) return null
+        return DIGITS.find(line)?.value?.toLongOrNull()
+    }
+
+    /** The band's BLE link-negotiation chatter ("Nordic Neg MTUs", "Data Lengths", "Effective MTUs"), repeated many times a second. */
+    fun isLinkNoise(line: String): Boolean =
+        fuzzyContains(line, "Neg MTUs") || fuzzyContains(line, "Data Lengths") || fuzzyContains(line, "Effective MTUs")
+
+    /** [needle] occurs in [hay], exactly or with one of its characters missing. */
+    internal fun fuzzyContains(hay: String, needle: String): Boolean {
+        if (hay.contains(needle)) return true
+        for (i in needle.indices) if (hay.contains(needle.removeRange(i, i + 1))) return true
+        return false
+    }
 }
 
 /** Standard GATT Heart Rate Measurement (0x2A37). RR values are kept in raw 1/1024 s units. */
