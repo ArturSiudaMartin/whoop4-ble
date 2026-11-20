@@ -13,13 +13,13 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 |---|---|
 | 1. Audit & plan | ✅ Done (`docs/ANDROID_APP_PLAN.md`) |
 | 2. Project setup & APK build | ✅ Done (see below) |
-| 3. Discovery & connection | ⏳ Next. Needs the phone for on-device testing |
-| 4. Live HR + RR ("Go live") | Not started |
-| 5. Historical sync | Not started |
+| 3. Discovery & connection | 🟡 Built, **not yet tested on a real band** |
+| 4. Live HR + RR ("Go live") | 🟡 Built, **not yet tested on a real band** |
+| 5. Historical sync | 🟡 Built and tested against a simulated band, **not yet on a real band** |
 | 6. Kotlin ↔ Python decoder parity | ✅ Done (see below) |
 | 7. Database | ✅ Done (see below) |
 | 8. Analytics | Not started |
-| 9. UI | Navigation + visual language only; screens show "Not yet available" |
+| 9. UI | Live and Device screens are functional; Home/Recovery/Sleep/Strain still show "Not yet available" |
 | 10. Background & reliability | Not started |
 | 11. Release | Not started |
 | 12. Concept2 PM5 | Planned (§8 of the plan) |
@@ -81,6 +81,36 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 - **Tests:** 11 Robolectric tests (`./gradlew :core:data:testDebugUnitTest`); 23 tests across the project.
 - **Open point for Phase 5:** the historical dedup key assumes (timestamp, sub-second) is unique per record. The
   band's record sequence counter is stored too, so this can be checked on the first real sync.
+
+### What Phases 3–5 contain (v0.2.0, needs real-band testing)
+
+Tested remotely: the user installs a build, tries it, and shares the **debug log** (Device screen → Share log).
+
+- **Discovery (`BandScanner`)**: lists bands already connected or paired at OS level (they stop advertising), plus a
+  12 s scan. Identified by the Whoop service UUID or a "WHOOP" name; falls back to all devices if none match.
+- **Connection (`GattClient`, `WhoopLink`)**: coroutine GATT wrapper with a serialised operation queue and timeouts,
+  MTU 247, service discovery, notifications on CMD_FROM / DATA_FROM, and frame reassembly.
+- **Live (`BandManager.startLive`)**: subscribes to the standard Heart Rate service and stores every measurement.
+  It reconnects automatically while live is on and keeps running with the screen off (foreground service).
+  - If no HR arrives within 7 s, it sends the **unverified** 0x0E / 0x03 enable-HR commands once (as the web and legacy
+    apps do) and logs the outcome, to settle whether they matter.
+- **Sync (`SyncEngine`)**: port of drain.py.
+  - Each pass sends SET_CLOCK (5-byte), SEND_HISTORICAL_DATA and GET_CLOCK.
+  - Each batch is committed to the DB, then ACKed (or not, in read-only mode).
+  - Multi-pass with reconnects, 20 s idle / 10 min cap, stop after 3 empty passes.
+  - Detects an invalid RTC and band reboots, and frames received before a disconnect are still saved.
+  - After a sync Bloop disconnects unless live is on.
+- **Tests**: 7 `SyncEngineTest` cases against a simulated band. They cover:
+  - a full sync, with every ACK only after the batch is stored (asserted by the fake band)
+  - read-only mode (no ACKs)
+  - a dropped connection mid-batch (resumes with no loss and no duplicates)
+  - an invalid RTC (from GET_CLOCK and from the console log)
+  - reboot detection, stop/abort, and an empty band
+- **UI**:
+  - Device screen: permissions, find/choose band, connect/disconnect, battery, Sync now / Stop, a read-only switch,
+    progress, sync history, and the debug log with Share and Clear.
+  - Live screen: Go live / Stop, HR, last RR, source, a 3-minute sparkline, and an explanation when no HR arrives.
+- **Not yet:** scheduled background syncs every few hours (Phase 10). Syncs are started by hand for now.
 
 ### Known issues / notes
 

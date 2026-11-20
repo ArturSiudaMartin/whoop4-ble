@@ -23,7 +23,7 @@ ksp {
 
 dependencies {
     api(project(":core:protocol"))
-    implementation(libs.room.runtime)
+    api(libs.room.runtime)   // BloopDatabase extends RoomDatabase, so consumers need it
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.kotlinx.coroutines.android)

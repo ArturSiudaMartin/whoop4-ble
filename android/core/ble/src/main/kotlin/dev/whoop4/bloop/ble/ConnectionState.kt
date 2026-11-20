@@ -1,15 +1,25 @@
 package dev.whoop4.bloop.ble
 
-/**
- * Connection states exposed to the UI. The GATT client, scanner, live-HR source and sync engine
- * that drive these states arrive in Phases 3–5.
- */
-sealed interface ConnectionState {
-    data object NoBandChosen : ConnectionState
-    data object Disconnected : ConnectionState
-    data object Connecting : ConnectionState
-    data object Connected : ConnectionState
-    data object Live : ConnectionState
-    data class Syncing(val pass: Int, val records: Long) : ConnectionState
-    data class Error(val message: String) : ConnectionState
+/** Link state shown in the UI. */
+enum class ConnectionState { NO_BAND, DISCONNECTED, CONNECTING, CONNECTED, ERROR }
+
+data class BandStatus(
+    val address: String? = null,
+    val name: String? = null,
+    val connection: ConnectionState = ConnectionState.NO_BAND,
+    val error: String? = null,
+    /** The user asked for a live connection ("Go live"). */
+    val liveRequested: Boolean = false,
+    /** Where live HR currently comes from, if any. */
+    val liveSource: String? = null,
+    /** Short explanation shown on the Live screen (e.g. why no HR is arriving). */
+    val liveNote: String? = null,
+    val lastHr: Int? = null,
+    val lastHrAtUtcMs: Long? = null,
+    val lastRrMs: Double? = null,
+    val syncing: Boolean = false,
+    val sync: SyncProgress? = null,
+) {
+    /** True while Bloop needs to keep running in the background (connected, live or syncing). */
+    val active: Boolean get() = liveRequested || syncing || connection == ConnectionState.CONNECTING || connection == ConnectionState.CONNECTED
 }

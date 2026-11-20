@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,32 +63,10 @@ fun StrainScreen() = Page {
     PendingCard("Strain", "Daily cardiovascular load (TRIMP-based, Bloop's own scale), heart-rate zones, activity history and how strain builds through the day.", "Phase 8")
 }
 
-@Composable
-fun LiveScreen() = Page {
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("--", style = MaterialTheme.typography.displayLarge, color = BloopColors.Live)
-            Text("bpm", color = BloopColors.Muted)
-        }
-    }
-    Button(
-        onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth().height(52.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = BloopColors.OnSurface, contentColor = BloopColors.Background),
-    ) { Text("Go live") }
-    PendingCard("Live connection on demand", "Tap Go live to open a live connection and stream heart rate and RR intervals for as long as you want. Between live sessions Bloop just connects every few hours to download what the band stored.", "Phases 3–4")
-}
-
-@Composable
-fun DeviceScreen() = Page {
-    PendingCard("Band", "Find and connect your band, see its battery and connection state, and disconnect.", "Phase 3")
-    PendingCard("Sync", "Sync status, last successful sync and history. Downloads are saved before each batch is acknowledged, with an optional read-only mode.", "Phase 5")
-    PendingCard("Background", "Automatic sync every few hours and when the band is nearby, plus Samsung battery settings guidance.", "Phase 10")
-}
-
 // ------------------------------------------------------------------ building blocks
 
 @Composable
-private fun Page(content: @Composable () -> Unit) {
+internal fun Page(content: @Composable () -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -98,7 +74,7 @@ private fun Page(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun CardBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun CardBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier
             .background(BloopColors.Surface, RoundedCornerShape(20.dp))
@@ -108,7 +84,7 @@ private fun CardBox(modifier: Modifier = Modifier, content: @Composable () -> Un
 }
 
 @Composable
-private fun PendingCard(title: String, body: String, phase: String) = CardBox(Modifier.fillMaxWidth()) {
+internal fun PendingCard(title: String, body: String, phase: String) = CardBox(Modifier.fillMaxWidth()) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
