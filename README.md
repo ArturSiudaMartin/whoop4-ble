@@ -60,6 +60,7 @@ Read these in order depending on what you want to do:
 |------------------|------|
 | **Use it** — pull your own data, set up a sync | This README's [Quickstart](#quickstart) → run the [examples/](examples/) |
 | **Use it from an Android phone** (no PC, no Python) | [`docs/ANDROID.md`](docs/ANDROID.md) — Web Bluetooth page in `web/index.html` |
+| **Bloop** — the native Android companion app (in progress) | [`android/README.md`](android/README.md) and [`docs/ANDROID_APP_PLAN.md`](docs/ANDROID_APP_PLAN.md) |
 | **Understand what every packet means** | [`docs/SAMPLE_SESSION.md`](docs/SAMPLE_SESSION.md) — annotated real captures |
 | **Look up the protocol** (frame format, commands, byte offsets) | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the authoritative reference |
 | **Know what's still unknown** | [`docs/STATUS.md`](docs/STATUS.md) — what's decoded, what's partially understood, what's a black box |

@@ -218,6 +218,7 @@ Seed vectors come from `SAMPLE_SESSION.md`. Real vectors come from the app's `ra
 | 9 | UI | Home / Recovery / Sleep / Strain / Live / Device screens bound to real data only; "calibrating" / "no data" states. |
 | 10 | Background & reliability | Periodic + presence-triggered sync, Samsung battery guidance, multi-day soak test on your phone, crash/ANR-free. |
 | 11 | Release | Final APK, install + Samsung setup guide, known limitations. |
+| 12 | Concept2 PM5 | See §8. Can be pulled forward to directly after Phase 7, since it does not depend on the Whoop analytics. |
 
 Phases 3–5 and 10 need **your phone**. The emulator has no Bluetooth. With the phone connected over USB
 (`adb`), I can install builds and read logs directly, which will speed things up a lot.
@@ -256,3 +257,29 @@ Phases 3–5 and 10 need **your phone**. The emulator has no Bluetooth. With the
 - **D4, name: Bloop.**
 - **D5, device testing.** Not available for now (the user works remotely). Device-dependent phases (3–5, 10) will be built
   and unit-tested, but their on-device checks are deferred and explicitly marked untested until the phone can be connected.
+
+## 8. Concept2 PM5 rowing monitor (requested 2026-11-20)
+
+**Goal:** connect Bloop to a Concept2 PM5 over Bluetooth and record rowing data alongside the band's heart rate.
+
+**Why it's lower-risk than the Whoop work:** Concept2 publishes an official Bluetooth interface specification for the PM5,
+so nothing has to be reverse-engineered. The service/characteristic UUIDs and byte layouts will be taken from that
+published document when this phase starts (not from memory) and cited in the code.
+
+**Scope (read-only):**
+- Scan for and connect to the PM5 (independently of the band; both connections can be open together).
+- Subscribe to the PM5's rowing status notifications: elapsed time, distance, pace/split, stroke rate, power/watts,
+  calories, drag factor, workout state, and the end-of-workout summary.
+- Store each piece as an `activity_session` of type *rowing*, with per-stroke/per-second samples, merged on the timeline with the
+  Whoop HR/RR recorded at the same time (from live mode or the next sync).
+- Show it in Strain (activity history, zones during the row) and a rowing detail screen.
+- Live mode: "Go live" can stream band HR and PM5 data together during a workout.
+
+**Out of scope unless asked:** programming workouts on the PM5 or sending any commands to it, firmware, and logbook upload.
+
+**Architecture:** a separate `core/pm5` module (parser in pure Kotlin for unit tests + an Android BLE client), reusing the
+GATT op queue from `core/ble`. Rowing tables are added to the Room schema with a migration.
+
+**Risks:** PM5 firmware versions differ in which characteristics they expose (handle missing ones gracefully). The PM5 also
+allows only a limited number of simultaneous BLE connections (ErgData/other apps must be disconnected). Testing needs access
+to an erg.

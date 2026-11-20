@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window from the very first frame (no grey flash before Compose draws). -->
+    <style name="Theme.Bloop" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bloop_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    <color name="bloop_background">#0B0D10</color>
+</resources>
