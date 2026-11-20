@@ -57,7 +57,8 @@ fun BloopApp() {
                     )
                 },
                 actions = {
-                    IconButton(onClick = { if (route != DEVICE_ROUTE) nav.navigate(DEVICE_ROUTE) }) {
+                    // The sliders icon toggles the Device screen.
+                    IconButton(onClick = { if (route == DEVICE_ROUTE) nav.popBackStack() else nav.navigate(DEVICE_ROUTE) { launchSingleTop = true } }) {
                         Icon(BloopIcons.Settings, contentDescription = "Device settings")
                     }
                 },
@@ -68,8 +69,11 @@ fun BloopApp() {
             NavigationBar(containerColor = BloopColors.Surface) {
                 Dest.entries.forEach { d ->
                     NavigationBarItem(
-                        selected = route == d.route,
+                        selected = route == d.route || (route == DEVICE_ROUTE && nav.previousBackStackEntry?.destination?.route == d.route),
                         onClick = {
+                            // Close the Device screen first: otherwise it is saved as part of the tab's state and
+                            // restoreState brings it straight back (the screen "wouldn't close").
+                            if (route == DEVICE_ROUTE) nav.popBackStack(DEVICE_ROUTE, inclusive = true)
                             nav.navigate(d.route) {
                                 popUpTo(nav.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true

@@ -103,17 +103,17 @@ private fun PermissionCard(request: () -> Unit) = CardBox(Modifier.fillMaxWidth(
 // ------------------------------------------------------------------ shared bits
 
 @Composable
-private fun PrimaryButton(text: String, enabled: Boolean = true, color: Color = BloopColors.OnSurface, onClick: () -> Unit) = Button(
+internal fun PrimaryButton(text: String, enabled: Boolean = true, color: Color = BloopColors.OnSurface, onClick: () -> Unit) = Button(
     onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(50.dp),
     colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = BloopColors.Background),
 ) { Text(text) }
 
 @Composable
-private fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) =
+internal fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) =
     OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.height(46.dp)) { Text(text, color = if (enabled) BloopColors.OnSurface else BloopColors.Muted) }
 
 @Composable
-private fun Row2(label: String, value: String, valueColor: Color = BloopColors.OnSurface) = Row(Modifier.fillMaxWidth()) {
+internal fun Row2(label: String, value: String, valueColor: Color = BloopColors.OnSurface) = Row(Modifier.fillMaxWidth()) {
     Text(label, color = BloopColors.Muted, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
     Text(value, color = valueColor, style = MaterialTheme.typography.bodyMedium)
 }
@@ -270,6 +270,9 @@ fun DeviceScreen() {
             }
         }
 
+        // ---- profile (inputs for the metrics)
+        ProfileCard(app)
+
         // ---- debug log
         DebugLogCard(app)
     }
@@ -357,3 +360,34 @@ private fun shareLog(ctx: Context, app: BloopApplication) {
         .putExtra(Intent.EXTRA_SUBJECT, "Bloop debug log").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(send, "Share debug log").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
+
+@Composable
+private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()) {
+    var ageText by remember { mutableStateOf(app.settings.age?.toString().orEmpty()) }
+    var need by remember { mutableStateOf(app.settings.sleepNeedHours) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Profile", style = MaterialTheme.typography.titleMedium)
+        androidx.compose.material3.OutlinedTextField(
+            value = ageText,
+            onValueChange = { v -> ageText = v.filter { it.isDigit() }.take(3) },
+            label = { Text("Age (for maximum heart rate)") },
+            singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Sleep need", modifier = Modifier.weight(1f))
+            TextButton({ need = (need - 0.25).coerceAtLeast(5.0) }) { Text("−") }
+            Text("%dh %02dm".format(need.toInt(), ((need % 1) * 60).toInt()))
+            TextButton({ need = (need + 0.25).coerceAtMost(12.0) }) { Text("+") }
+        }
+        Text("Only used on this phone. Without an age, maximum heart rate is estimated from the highest heart rate seen, which makes strain read high.",
+            color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+        PrimaryButton("Save and recompute metrics") {
+            app.settings.age = ageText.toIntOrNull()?.takeIf { it in 10..100 }
+            app.settings.sleepNeedHours = need
+            app.recomputeAll()
+        }
+    }
+}
+

@@ -226,6 +226,8 @@ data class DailySummaryEntity(
 object MetricKind {
     const val MEASURED = "MEASURED"
     const val ESTIMATED = "ESTIMATED"
+    /** A fixed formula on measured data (e.g. RMSSD, lowest 5-minute HR). */
+    const val DERIVED = "DERIVED"
 }
 
 /** A computed value (e.g. nightly RMSSD, resting HR, recovery). Missing data means no row, never a guessed value. */

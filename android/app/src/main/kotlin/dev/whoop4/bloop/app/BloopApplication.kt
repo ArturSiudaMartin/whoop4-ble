@@ -21,6 +21,7 @@ class BloopApplication : Application() {
     lateinit var log: DebugLog; private set
     lateinit var band: BandManager; private set
     lateinit var settings: Settings; private set
+    lateinit var analytics: AnalyticsRunner; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +38,7 @@ class BloopApplication : Application() {
         }
         logLastExit()
         band = BandManager(this, log, scope) { address -> RoomSyncStore(db, ingest, address) }
+        analytics = AnalyticsRunner(db, settings, log)
 
         scope.launch { db.syncRuns().markInterrupted(System.currentTimeMillis()).takeIf { it > 0 }?.let { log.w("$it interrupted sync run(s) marked PARTIAL") } }
         // Live measurements are stored as they arrive.
@@ -47,6 +49,7 @@ class BloopApplication : Application() {
             }
         }
         settings.bandAddress?.let { band.selectBand(it, settings.bandName) }
+        scheduleAnalytics()
     }
 
     /** Why the previous process ended (killed by the system, crash, user swipe…), from Android 11 on. */
@@ -75,6 +78,41 @@ class BloopApplication : Application() {
         else -> "code $r"
     }
 
+    /** Metrics are recomputed on start (recent days, or everything once) and after every sync, from the run's earliest record. */
+    private fun scheduleAnalytics() {
+        scope.launch {
+            val a = band.status.value.address ?: return@launch
+            val now = System.currentTimeMillis()
+            val from = if (settings.analyticsBackfilled) now - 2 * DAY_MS
+                else db.samples().earliest(a, dev.whoop4.bloop.data.SampleSource.HISTORICAL) ?: return@launch
+            analytics.recompute(a, from)
+            settings.analyticsBackfilled = true
+        }
+        scope.launch {
+            var wasSyncing = false
+            band.status.collect { s ->
+                if (wasSyncing && !s.syncing) {
+                    val a = s.address
+                    val run = s.sync?.runId?.takeIf { it > 0 }
+                    if (a != null && run != null) launch {
+                        val from = db.samples().earliestInRun(run) ?: return@launch
+                        analytics.recompute(a, from)
+                        settings.analyticsBackfilled = true
+                    }
+                }
+                wasSyncing = s.syncing
+            }
+        }
+    }
+
+    /** Recompute everything (e.g. after the profile changed). */
+    fun recomputeAll() {
+        scope.launch {
+            val a = band.status.value.address ?: return@launch
+            analytics.recompute(a, db.samples().earliest(a, dev.whoop4.bloop.data.SampleSource.HISTORICAL) ?: return@launch)
+        }
+    }
+
     fun chooseBand(address: String, name: String?) {
         settings.bandAddress = address; settings.bandName = name
         band.selectBand(address, name)
@@ -86,6 +124,7 @@ class BloopApplication : Application() {
     }
 
     companion object {
+        const val DAY_MS = 86_400_000L
         fun from(c: Context) = c.applicationContext as BloopApplication
     }
 }
@@ -102,4 +141,15 @@ class Settings(c: Context) {
     var readOnlySync: Boolean
         get() = p.getBoolean("readOnlySync", false)
         set(v) = p.edit().putBoolean("readOnlySync", v).apply()
+    /** For the Tanaka maximum-HR formula; null = not set (maximum HR is then estimated from data). */
+    var age: Int?
+        get() = p.getInt("age", -1).takeIf { it > 0 }
+        set(v) = p.edit().putInt("age", v ?: -1).apply()
+    /** Sleep need for sleep performance; 8 h unless the user changes it. */
+    var sleepNeedHours: Double
+        get() = p.getFloat("sleepNeedHours", 8f).toDouble()
+        set(v) = p.edit().putFloat("sleepNeedHours", v.toFloat()).apply()
+    var analyticsBackfilled: Boolean
+        get() = p.getBoolean("analyticsBackfilled", false)
+        set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()
 }

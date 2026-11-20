@@ -11,8 +11,8 @@ android {
         applicationId = "dev.whoop4.bloop"   // differs from the legacy app (dev.whoop4.hr): both install side by side
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.3.0"
     }
 
     buildTypes {

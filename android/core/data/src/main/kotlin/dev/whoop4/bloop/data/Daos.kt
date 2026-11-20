@@ -44,6 +44,18 @@ interface SampleDao {
     suspend fun samplesBetween(device: String, fromUtcMs: Long, toUtcMs: Long): List<HrSampleEntity>
 
     @Query(
+        """SELECT * FROM hr_sample WHERE deviceAddress = :device AND source = :source AND tsUtcMs >= :fromUtcMs AND tsUtcMs < :toUtcMs
+           ORDER BY tsUtcMs, subKey""",
+    )
+    suspend fun samplesBetween(device: String, source: Int, fromUtcMs: Long, toUtcMs: Long): List<HrSampleEntity>
+
+    @Query("SELECT MIN(tsUtcMs) FROM hr_sample WHERE syncRunId = :runId")
+    suspend fun earliestInRun(runId: Long): Long?
+
+    @Query("SELECT MIN(tsUtcMs) FROM hr_sample WHERE deviceAddress = :device AND source = :source")
+    suspend fun earliest(device: String, source: Int): Long?
+
+    @Query(
         """SELECT * FROM rr_interval WHERE deviceAddress = :device AND sampleTsUtcMs >= :fromUtcMs AND sampleTsUtcMs < :toUtcMs
            ORDER BY sampleTsUtcMs, subKey, idx""",
     )
@@ -131,6 +143,10 @@ interface SleepDao {
     @Insert
     suspend fun insertStages(stages: List<SleepStageEntity>)
 
+    /** Removes earlier results of [method] for a night window before it is recomputed (stages cascade). */
+    @Query("DELETE FROM sleep_session WHERE deviceAddress = :device AND method = :method AND endUtcMs > :fromUtcMs AND startUtcMs < :toUtcMs")
+    suspend fun deleteOverlapping(device: String, method: String, fromUtcMs: Long, toUtcMs: Long): Int
+
     @Query("SELECT * FROM sleep_session WHERE deviceAddress = :device ORDER BY startUtcMs DESC LIMIT :limit")
     fun observeRecent(device: String, limit: Int): Flow<List<SleepSessionEntity>>
 
@@ -148,4 +164,17 @@ interface MetricDao {
 
     @Query("SELECT * FROM metric_value WHERE deviceAddress = :device AND key = :key ORDER BY periodStartUtcMs DESC LIMIT :limit")
     fun observe(device: String, key: String, limit: Int): Flow<List<MetricValueEntity>>
+
+    @Query("SELECT * FROM metric_value WHERE deviceAddress = :device AND periodStartUtcMs >= :fromUtcMs AND periodStartUtcMs < :toUtcMs ORDER BY periodStartUtcMs")
+    suspend fun between(device: String, fromUtcMs: Long, toUtcMs: Long): List<MetricValueEntity>
+
+    @Query("SELECT * FROM metric_value WHERE deviceAddress = :device AND periodStartUtcMs >= :fromUtcMs ORDER BY periodStartUtcMs")
+    fun observeSince(device: String, fromUtcMs: Long): Flow<List<MetricValueEntity>>
+
+    /** A recomputation that now yields "no data" must remove the old value, never leave a stale number. */
+    @Query("DELETE FROM metric_value WHERE deviceAddress = :device AND periodStartUtcMs = :periodStartUtcMs AND key NOT IN (:keep)")
+    suspend fun deleteOthers(device: String, periodStartUtcMs: Long, keep: List<String>): Int
+
+    @Query("SELECT * FROM daily_summary WHERE deviceAddress = :device ORDER BY localDate DESC LIMIT :limit")
+    fun observeDaily(device: String, limit: Int): Flow<List<DailySummaryEntity>>
 }

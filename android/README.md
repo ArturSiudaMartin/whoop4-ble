@@ -18,8 +18,8 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 | 5. Historical sync | ✅ Real band: ~16 h of history in ~8 min, resumed correctly after the app was killed; HISTORY_COMPLETE not yet reached |
 | 6. Kotlin ↔ Python decoder parity | ✅ Done (see below) |
 | 7. Database | ✅ Done (see below) |
-| 8. Analytics | Not started |
-| 9. UI | Live and Device screens are functional; Home/Recovery/Sleep/Strain still show "Not yet available" |
+| 8. Analytics | ✅ Engine done and unit-tested on synthetic nights (v0.3.0); awaiting validation on real nights |
+| 9. UI | 🟡 All tabs show real metrics with measured/derived/estimate tags; polish pending |
 | 10. Background & reliability | Not started |
 | 11. Release | Not started |
 | 12. Concept2 PM5 | Planned (§8 of the plan) |
@@ -111,6 +111,23 @@ Tested remotely: the user installs a build, tries it, and shares the **debug log
     progress, sync history, and the debug log with Share and Clear.
   - Live screen: Go live / Stop, HR, last RR, source, a 3-minute sparkline, and an explanation when no HR arrives.
 - **Not yet:** scheduled background syncs every few hours (Phase 10). Syncs are started by hand for now.
+
+### What Phase 8 contains (v0.3.0)
+
+`core/analytics` (pure Kotlin, 25 unit tests on synthetic nights with known truth) and `app/AnalyticsRunner`:
+
+| Metric | Method | Kind |
+|---|---|---|
+| RR cleaning | 300–2000 ms and ±20 % of the median of the last 5 beats; gaps > 3 s break runs | quality |
+| HRV | RMSSD per 5-min window over clean RR in the sleep period; nightly = median (also ln RMSSD) | derived |
+| Resting HR | lowest 5-min mean HR in the sleep period (80 % coverage); 5th percentile kept as a check | derived |
+| Sleep | van Hees arm-angle: HDCZA sleep period (2018) + 5°/5-min sustained inactivity (2015), 18:00–14:00 window; no stages | estimate |
+| Sleep performance | asleep ÷ sleep need (Profile, default 8 h) | estimate |
+| Strain | Edwards TRIMP on Karvonen zones, shown as 21 × (1 − e^(−TRIMP/250)) (Bloop's own scale); HRmax from age (Tanaka) or the highest observed | estimate |
+| Recovery | 0.5·z(ln RMSSD) − 0.3·z(RHR) + 0.2·z(sleep) vs the previous 28 days, normal CDF → 1–99 %; hidden until 4 nights | estimate |
+
+Metrics are recomputed after every sync (from the run's earliest record) and on app start; only band-stored
+samples are used. A metric that can't be computed is deleted for that day rather than left stale.
 
 ### Real-band findings (v0.2.1, from the first shared debug log, 2026-11-20)
 
