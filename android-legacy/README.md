@@ -1,4 +1,7 @@
-# Whoop HR — Android app
+# Whoop HR (legacy) — Android app
+
+> This is the original, minimal Java app (live HR + start/stop session tracking), kept as-is.
+> The full companion app, **Bloop**, lives in [`../android`](../android). Both can be installed side by side.
 
 A small native Android app (plain Java, no libraries) that connects to the Whoop 4.0 strap and records
 heart-rate sessions **with the screen off or the app in the background**. The web app in `web/` can't do
@@ -36,7 +39,7 @@ Then, in the app:
 Requires the Android SDK (platform 36) and a JDK 17+ (Android Studio's bundled JBR works):
 
 ```bash
-cd android
+cd android-legacy
 echo "sdk.dir=/path/to/Android/Sdk" > local.properties
 JAVA_HOME="/path/to/Android Studio/jbr" ./gradlew assembleRelease
 # → app/build/outputs/apk/release/app-release.apk (signed with the debug key, for sideloading)
