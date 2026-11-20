@@ -252,13 +252,36 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ scanning
     private void scanAndPick() {
-        BluetoothAdapter ad = getSystemService(BluetoothManager.class).getAdapter();
+        BluetoothManager bm = getSystemService(BluetoothManager.class);
+        BluetoothAdapter ad = bm.getAdapter();
         if (ad == null) { toast("This phone has no Bluetooth."); return; }
         if (!ad.isEnabled()) { startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)); return; }
+        if (Build.VERSION.SDK_INT <= 30 && !isLocationOn()) {
+            new AlertDialog.Builder(this).setTitle("Turn on Location")
+                    .setMessage("On this Android version, Bluetooth scanning only works while Location is on.")
+                    .setPositiveButton("Open settings", (d, w) -> startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
         BluetoothLeScanner sc = ad.getBluetoothLeScanner();
         if (sc == null) { toast("Bluetooth scanner unavailable."); return; }
 
-        Map<String, String> whoop = new LinkedHashMap<>(), other = new LinkedHashMap<>();
+        // address -> label. Whoop bands first; everything else is kept (with signal strength) as a fallback.
+        Map<String, String> whoop = new LinkedHashMap<>();
+        Map<String, String> otherName = new LinkedHashMap<>();
+        Map<String, Integer> otherRssi = new LinkedHashMap<>();
+        int[] seen = {0};
+        String[] scanError = {null};
+
+        // A band that is already connected (e.g. to Chrome or the Whoop app) or paired stops advertising,
+        // so a scan can't see it — but it can still be connected to. List those directly.
+        try {
+            for (BluetoothDevice d : bm.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT))
+                if (isWhoopName(d.getName())) whoop.put(d.getAddress(), d.getName() + "  (already connected)");
+            for (BluetoothDevice d : ad.getBondedDevices())
+                if (isWhoopName(d.getName()) && !whoop.containsKey(d.getAddress())) whoop.put(d.getAddress(), d.getName() + "  (paired)");
+        } catch (Exception e) { HrService.Live.log("Listing connected devices failed: " + e.getMessage()); }
+
         TextView msg = Ui.text(this, 14, Ui.FG, false);
         int p = Ui.dp(this, 20);
         msg.setPadding(p, p, p, 0);
@@ -266,18 +289,24 @@ public class MainActivity extends Activity {
         AlertDialog[] dlg = new AlertDialog[1];
         ScanCallback cb = new ScanCallback() {
             @Override public void onScanResult(int type, ScanResult r) {
+                seen[0]++;
                 BluetoothDevice d = r.getDevice();
                 String name = r.getScanRecord() != null ? r.getScanRecord().getDeviceName() : null;
                 if (name == null) name = d.getName();
                 List<ParcelUuid> ids = r.getScanRecord() != null ? r.getScanRecord().getServiceUuids() : null;
-                boolean isWhoop = (name != null && name.toUpperCase(Locale.US).contains("WHOOP"))
-                        || (ids != null && ids.contains(new ParcelUuid(Whoop.SVC)));
-                if (isWhoop) whoop.put(d.getAddress(), name != null ? name : d.getAddress());
-                else if (name != null) other.put(d.getAddress(), name);
-                msg.setText("Searching for your band… found " + whoop.size() + " Whoop band(s)");
+                boolean isWhoop = isWhoopName(name) || (ids != null && ids.contains(new ParcelUuid(Whoop.SVC)));
+                if (isWhoop) whoop.put(d.getAddress(), name != null ? name : "Whoop band");
+                else {
+                    if (name != null || !otherName.containsKey(d.getAddress())) otherName.put(d.getAddress(), name);
+                    otherRssi.put(d.getAddress(), r.getRssi());
+                }
+                msg.setText("Searching for your band… " + whoop.size() + " Whoop band(s), " + otherName.size() + " other device(s)");
             }
+            @Override public void onScanFailed(int errorCode) { scanError[0] = "Bluetooth scan failed (error " + errorCode + ")"; }
         };
-        sc.startScan(null, new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb);
+        try {
+            sc.startScan(null, new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb);
+        } catch (Exception e) { scanError[0] = "Bluetooth scan failed: " + e.getMessage(); }
         dlg[0] = new AlertDialog.Builder(this).setTitle("Choose band").setView(msg)
                 .setNegativeButton("Cancel", (d, w) -> {}).setOnDismissListener(d -> { try { sc.stopScan(cb); } catch (Exception ignored) {} })
                 .show();
@@ -285,22 +314,47 @@ public class MainActivity extends Activity {
             try { sc.stopScan(cb); } catch (Exception ignored) {}
             if (!dlg[0].isShowing()) return;
             dlg[0].dismiss();
-            Map<String, String> list = whoop.isEmpty() ? other : whoop;
-            if (list.isEmpty()) {
+            HrService.Live.log("Scan: " + seen[0] + " results, " + whoop.size() + " Whoop, " + otherName.size() + " other"
+                    + (scanError[0] != null ? " — " + scanError[0] : ""));
+
+            List<String> addrs = new ArrayList<>(), labels = new ArrayList<>();
+            boolean fallback = whoop.isEmpty();
+            if (!fallback) {
+                for (Map.Entry<String, String> e : whoop.entrySet()) { addrs.add(e.getKey()); labels.add(e.getValue() + "\n" + e.getKey()); }
+            } else {
+                // No Whoop by name: show every device, strongest signal first (the band on your wrist is usually near the top).
+                List<String> keys = new ArrayList<>(otherName.keySet());
+                keys.sort((x, y) -> Integer.compare(otherRssi.getOrDefault(y, -127), otherRssi.getOrDefault(x, -127)));
+                for (String k : keys) {
+                    String n = otherName.get(k);
+                    addrs.add(k);
+                    labels.add((n != null ? n : "Unnamed device") + "  ·  " + otherRssi.get(k) + " dBm\n" + k);
+                }
+            }
+            if (addrs.isEmpty()) {
+                String why = scanError[0] != null ? scanError[0] + "."
+                        : seen[0] == 0 ? "The scan returned nothing at all — that usually means a phone setting is blocking it. "
+                                + "Check that Location is on and that Whoop HR has the Nearby devices permission (App info → Permissions)."
+                        : "";
                 new AlertDialog.Builder(this).setTitle("No band found")
-                        .setMessage("Make sure the band is nearby and the official Whoop app is force-stopped, then try again.")
+                        .setMessage(why + "\n\nA band that is connected to something else stops advertising. Close the Whoop BLE "
+                                + "web page in Chrome, force-stop the official Whoop app, then try again.")
                         .setPositiveButton("OK", null).show();
                 return;
             }
-            String[] addrs = list.keySet().toArray(new String[0]);
-            String[] labels = new String[addrs.length];
-            for (int i = 0; i < addrs.length; i++) labels[i] = list.get(addrs[i]) + "\n" + addrs[i];
-            new AlertDialog.Builder(this).setTitle(whoop.isEmpty() ? "No Whoop found — all devices" : "Choose band")
-                    .setItems(labels, (d, i) -> {
-                        prefs.edit().putString("address", addrs[i]).apply();
-                        HrService.send(this, HrService.ACTION_CONNECT, addrs[i]);
+            new AlertDialog.Builder(this).setTitle(fallback ? "No Whoop by name — pick your band" : "Choose band")
+                    .setItems(labels.toArray(new String[0]), (d, i) -> {
+                        prefs.edit().putString("address", addrs.get(i)).apply();
+                        HrService.send(this, HrService.ACTION_CONNECT, addrs.get(i));
                     }).setNegativeButton("Cancel", null).show();
         }, 10000);
+    }
+
+    private static boolean isWhoopName(String n) { return n != null && n.toUpperCase(Locale.US).contains("WHOOP"); }
+
+    private boolean isLocationOn() {
+        android.location.LocationManager lm = getSystemService(android.location.LocationManager.class);
+        return lm == null || Build.VERSION.SDK_INT < 28 || lm.isLocationEnabled();
     }
 
     // ------------------------------------------------------------------ rendering
