@@ -17,7 +17,7 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 | 4. Live HR + RR ("Go live") | Not started |
 | 5. Historical sync | Not started |
 | 6. Kotlin ↔ Python decoder parity | ✅ Done (see below) |
-| 7. Database | Not started (Room toolchain proven with a skeleton table) |
+| 7. Database | ✅ Done (see below) |
 | 8. Analytics | Not started |
 | 9. UI | Navigation + visual language only; screens show "Not yet available" |
 | 10. Background & reliability | Not started |
@@ -56,6 +56,31 @@ phone and computes its own, clearly labelled metrics. No Whoop subscription or c
 - **Bug found and fixed:** frame reassembly now validates the header CRC-8 before treating a notification as a new
   frame. The SOF-only check in the web and legacy apps loses a frame when a continuation chunk starts with `0xAA`
   (caught by the test that splits all vectors into 20-byte notifications). The band's header CRC-8 was verified on real captures.
+
+### What Phase 7 contains
+
+- **Room schema v2** (`core/data`), exported to `core/data/schemas/2.json`. All timestamps are UTC epoch ms.
+  Tables: `device`, `hr_sample`, `rr_interval`, `band_event`, `raw_packet`, `sync_run`, `activity_session`,
+  `sleep_session`, `sleep_stage`, `daily_summary`, `metric_value`. Bloop-computed values always carry
+  `method`, `methodVersion` and `confidence`; missing data is no row, never a guessed number.
+- **No duplicates:** unique indices act as dedup keys and rows are inserted with IGNORE.
+  - Historical samples are keyed on (device, timestamp, sub-second).
+  - Live samples are keyed on the phone's receive time.
+  - Events are keyed on their raw bytes, which include the band's event clock.
+  - Raw frames are keyed on a SHA-256-derived 64-bit hash.
+  - Re-syncing the same data adds nothing (tested).
+- **Commit-before-ACK:** `IngestRepository.ingestFrames` stores a batch (raw frames, samples, RR, events) in **one
+  transaction**, so the Phase 5 sync engine can ACK a batch only after it is durably stored. Atomicity is tested.
+- **Raw archive:** every sync frame is kept verbatim (as `drain.py` does) so it can be re-decoded later. It can be
+  switched off, and there is a retention query.
+- **Interrupted syncs:** runs left `RUNNING` by a crash or kill are marked `PARTIAL` on the next start.
+- **Export:** `JsonlExporter` writes `hr.jsonl` in `drain.py`'s exact format (same keys, `.NNN` same-second counter,
+  Python-style 4-decimal rounding of accel), so Bloop data merges with data from the Python toolkit or the web app.
+- **Upgrade from the Phase 2 preview:** Room auto-migration 1 → 2, tested with `MigrationTestHelper`. Destructive
+  fallback is never enabled.
+- **Tests:** 11 Robolectric tests (`./gradlew :core:data:testDebugUnitTest`); 23 tests across the project.
+- **Open point for Phase 5:** the historical dedup key assumes (timestamp, sub-second) is unique per record. The
+  band's record sequence counter is stored too, so this can be checked on the first real sync.
 
 ### Known issues / notes
 

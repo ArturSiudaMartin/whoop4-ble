@@ -11,6 +11,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    // Room's MigrationTestHelper reads the exported schemas as test assets (run under Robolectric).
+    sourceSets.getByName("test").assets.directories.add("$projectDir/schemas")
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 ksp {
@@ -25,4 +28,8 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.room.testing)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

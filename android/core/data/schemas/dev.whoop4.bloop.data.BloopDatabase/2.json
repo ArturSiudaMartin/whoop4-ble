@@ -1,0 +1,912 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "d0c2737c86cc056f811f66298ea0b085",
+    "entities": [
+      {
+        "tableName": "device",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`address` TEXT NOT NULL, `name` TEXT, `lastSeenUtcMs` INTEGER, `firstSeenUtcMs` INTEGER, `lastBatteryPct` REAL, `lastBatteryAtUtcMs` INTEGER, `lastHwRtc` INTEGER, `lastHwRtcAtUtcMs` INTEGER, PRIMARY KEY(`address`))",
+        "fields": [
+          {
+            "fieldPath": "address",
+            "columnName": "address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSeenUtcMs",
+            "columnName": "lastSeenUtcMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "firstSeenUtcMs",
+            "columnName": "firstSeenUtcMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastBatteryPct",
+            "columnName": "lastBatteryPct",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lastBatteryAtUtcMs",
+            "columnName": "lastBatteryAtUtcMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastHwRtc",
+            "columnName": "lastHwRtc",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastHwRtcAtUtcMs",
+            "columnName": "lastHwRtcAtUtcMs",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "address"
+          ]
+        }
+      },
+      {
+        "tableName": "hr_sample",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `source` INTEGER NOT NULL, `tsUtcMs` INTEGER NOT NULL, `subKey` INTEGER NOT NULL, `hr` INTEGER NOT NULL, `bandSequence` INTEGER, `accelX` REAL, `accelY` REAL, `accelZ` REAL, `syncRunId` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tsUtcMs",
+            "columnName": "tsUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subKey",
+            "columnName": "subKey",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hr",
+            "columnName": "hr",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bandSequence",
+            "columnName": "bandSequence",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "accelX",
+            "columnName": "accelX",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "accelY",
+            "columnName": "accelY",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "accelZ",
+            "columnName": "accelZ",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "syncRunId",
+            "columnName": "syncRunId",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_hr_sample_deviceAddress_source_tsUtcMs_subKey",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "source",
+              "tsUtcMs",
+              "subKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_hr_sample_deviceAddress_source_tsUtcMs_subKey` ON `${TABLE_NAME}` (`deviceAddress`, `source`, `tsUtcMs`, `subKey`)"
+          },
+          {
+            "name": "index_hr_sample_deviceAddress_tsUtcMs",
+            "unique": false,
+            "columnNames": [
+              "deviceAddress",
+              "tsUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_hr_sample_deviceAddress_tsUtcMs` ON `${TABLE_NAME}` (`deviceAddress`, `tsUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "rr_interval",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `source` INTEGER NOT NULL, `sampleTsUtcMs` INTEGER NOT NULL, `subKey` INTEGER NOT NULL, `idx` INTEGER NOT NULL, `rrMs` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleTsUtcMs",
+            "columnName": "sampleTsUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subKey",
+            "columnName": "subKey",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idx",
+            "columnName": "idx",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rrMs",
+            "columnName": "rrMs",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_rr_interval_deviceAddress_source_sampleTsUtcMs_subKey_idx",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "source",
+              "sampleTsUtcMs",
+              "subKey",
+              "idx"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_rr_interval_deviceAddress_source_sampleTsUtcMs_subKey_idx` ON `${TABLE_NAME}` (`deviceAddress`, `source`, `sampleTsUtcMs`, `subKey`, `idx`)"
+          },
+          {
+            "name": "index_rr_interval_deviceAddress_sampleTsUtcMs",
+            "unique": false,
+            "columnNames": [
+              "deviceAddress",
+              "sampleTsUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_rr_interval_deviceAddress_sampleTsUtcMs` ON `${TABLE_NAME}` (`deviceAddress`, `sampleTsUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "band_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `receivedAtUtcMs` INTEGER NOT NULL, `eventType` INTEGER NOT NULL, `name` TEXT, `deviceClock` INTEGER, `subClock` INTEGER, `batteryPct` REAL, `skinTempC` REAL, `payloadHex` TEXT NOT NULL, `rawHex` TEXT NOT NULL, `syncRunId` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAtUtcMs",
+            "columnName": "receivedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deviceClock",
+            "columnName": "deviceClock",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "subClock",
+            "columnName": "subClock",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "batteryPct",
+            "columnName": "batteryPct",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "skinTempC",
+            "columnName": "skinTempC",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "payloadHex",
+            "columnName": "payloadHex",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawHex",
+            "columnName": "rawHex",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncRunId",
+            "columnName": "syncRunId",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_band_event_deviceAddress_rawHex",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "rawHex"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_band_event_deviceAddress_rawHex` ON `${TABLE_NAME}` (`deviceAddress`, `rawHex`)"
+          },
+          {
+            "name": "index_band_event_deviceAddress_receivedAtUtcMs",
+            "unique": false,
+            "columnNames": [
+              "deviceAddress",
+              "receivedAtUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_band_event_deviceAddress_receivedAtUtcMs` ON `${TABLE_NAME}` (`deviceAddress`, `receivedAtUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "raw_packet",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `receivedAtUtcMs` INTEGER NOT NULL, `packetType` INTEGER NOT NULL, `bytes` BLOB NOT NULL, `hash64` INTEGER NOT NULL, `syncRunId` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAtUtcMs",
+            "columnName": "receivedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packetType",
+            "columnName": "packetType",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytes",
+            "columnName": "bytes",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hash64",
+            "columnName": "hash64",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncRunId",
+            "columnName": "syncRunId",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_raw_packet_deviceAddress_hash64",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "hash64"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_raw_packet_deviceAddress_hash64` ON `${TABLE_NAME}` (`deviceAddress`, `hash64`)"
+          },
+          {
+            "name": "index_raw_packet_receivedAtUtcMs",
+            "unique": false,
+            "columnNames": [
+              "receivedAtUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_raw_packet_receivedAtUtcMs` ON `${TABLE_NAME}` (`receivedAtUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_run",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `startedAtUtcMs` INTEGER NOT NULL, `endedAtUtcMs` INTEGER, `trigger` TEXT NOT NULL, `readOnly` INTEGER NOT NULL, `passes` INTEGER NOT NULL, `batches` INTEGER NOT NULL, `packets` INTEGER NOT NULL, `newSamples` INTEGER NOT NULL, `newEvents` INTEGER NOT NULL, `lastTrim` INTEGER, `hwRtc` INTEGER, `rtcDriftS` INTEGER, `rebootDetected` INTEGER NOT NULL, `outcome` TEXT NOT NULL, `error` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtUtcMs",
+            "columnName": "startedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtUtcMs",
+            "columnName": "endedAtUtcMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "trigger",
+            "columnName": "trigger",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readOnly",
+            "columnName": "readOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "passes",
+            "columnName": "passes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "batches",
+            "columnName": "batches",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packets",
+            "columnName": "packets",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "newSamples",
+            "columnName": "newSamples",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "newEvents",
+            "columnName": "newEvents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastTrim",
+            "columnName": "lastTrim",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "hwRtc",
+            "columnName": "hwRtc",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rtcDriftS",
+            "columnName": "rtcDriftS",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rebootDetected",
+            "columnName": "rebootDetected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_run_deviceAddress_startedAtUtcMs",
+            "unique": false,
+            "columnNames": [
+              "deviceAddress",
+              "startedAtUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_run_deviceAddress_startedAtUtcMs` ON `${TABLE_NAME}` (`deviceAddress`, `startedAtUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "activity_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT, `type` TEXT NOT NULL, `origin` TEXT NOT NULL, `startUtcMs` INTEGER NOT NULL, `endUtcMs` INTEGER, `name` TEXT, `notes` TEXT, `createdAtUtcMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startUtcMs",
+            "columnName": "startUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endUtcMs",
+            "columnName": "endUtcMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtUtcMs",
+            "columnName": "createdAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_activity_session_startUtcMs",
+            "unique": false,
+            "columnNames": [
+              "startUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_activity_session_startUtcMs` ON `${TABLE_NAME}` (`startUtcMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sleep_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `startUtcMs` INTEGER NOT NULL, `endUtcMs` INTEGER NOT NULL, `method` TEXT NOT NULL, `methodVersion` INTEGER NOT NULL, `confidence` REAL NOT NULL, `computedAtUtcMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startUtcMs",
+            "columnName": "startUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endUtcMs",
+            "columnName": "endUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "method",
+            "columnName": "method",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "methodVersion",
+            "columnName": "methodVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "computedAtUtcMs",
+            "columnName": "computedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sleep_session_deviceAddress_startUtcMs_method",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "startUtcMs",
+              "method"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sleep_session_deviceAddress_startUtcMs_method` ON `${TABLE_NAME}` (`deviceAddress`, `startUtcMs`, `method`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sleep_stage",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sleepSessionId` INTEGER NOT NULL, `startUtcMs` INTEGER NOT NULL, `endUtcMs` INTEGER NOT NULL, `stage` TEXT NOT NULL, `confidence` REAL NOT NULL, FOREIGN KEY(`sleepSessionId`) REFERENCES `sleep_session`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sleepSessionId",
+            "columnName": "sleepSessionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startUtcMs",
+            "columnName": "startUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endUtcMs",
+            "columnName": "endUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stage",
+            "columnName": "stage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sleep_stage_sleepSessionId_startUtcMs",
+            "unique": false,
+            "columnNames": [
+              "sleepSessionId",
+              "startUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sleep_stage_sleepSessionId_startUtcMs` ON `${TABLE_NAME}` (`sleepSessionId`, `startUtcMs`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "sleep_session",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sleepSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "daily_summary",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`deviceAddress` TEXT NOT NULL, `localDate` TEXT NOT NULL, `zoneId` TEXT NOT NULL, `dayStartUtcMs` INTEGER NOT NULL, `dayEndUtcMs` INTEGER NOT NULL, `coverage` REAL NOT NULL, `computedAtUtcMs` INTEGER NOT NULL, PRIMARY KEY(`deviceAddress`, `localDate`))",
+        "fields": [
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localDate",
+            "columnName": "localDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zoneId",
+            "columnName": "zoneId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayStartUtcMs",
+            "columnName": "dayStartUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayEndUtcMs",
+            "columnName": "dayEndUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "coverage",
+            "columnName": "coverage",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "computedAtUtcMs",
+            "columnName": "computedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "deviceAddress",
+            "localDate"
+          ]
+        }
+      },
+      {
+        "tableName": "metric_value",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `deviceAddress` TEXT NOT NULL, `key` TEXT NOT NULL, `periodStartUtcMs` INTEGER NOT NULL, `periodEndUtcMs` INTEGER NOT NULL, `value` REAL NOT NULL, `kind` TEXT NOT NULL, `method` TEXT NOT NULL, `methodVersion` INTEGER NOT NULL, `confidence` REAL, `computedAtUtcMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceAddress",
+            "columnName": "deviceAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodStartUtcMs",
+            "columnName": "periodStartUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodEndUtcMs",
+            "columnName": "periodEndUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "method",
+            "columnName": "method",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "methodVersion",
+            "columnName": "methodVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "computedAtUtcMs",
+            "columnName": "computedAtUtcMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_metric_value_deviceAddress_key_periodStartUtcMs_method",
+            "unique": true,
+            "columnNames": [
+              "deviceAddress",
+              "key",
+              "periodStartUtcMs",
+              "method"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_metric_value_deviceAddress_key_periodStartUtcMs_method` ON `${TABLE_NAME}` (`deviceAddress`, `key`, `periodStartUtcMs`, `method`)"
+          },
+          {
+            "name": "index_metric_value_key_periodStartUtcMs",
+            "unique": false,
+            "columnNames": [
+              "key",
+              "periodStartUtcMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_metric_value_key_periodStartUtcMs` ON `${TABLE_NAME}` (`key`, `periodStartUtcMs`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd0c2737c86cc056f811f66298ea0b085')"
+    ]
+  }
+}
