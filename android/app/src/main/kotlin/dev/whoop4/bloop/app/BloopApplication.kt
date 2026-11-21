@@ -91,7 +91,10 @@ class BloopApplication : Application() {
         }
         scope.launch {
             var wasSyncing = false
+            var wasLive = false
             band.status.collect { s ->
+                if (wasLive && !s.liveRequested) recomputeToday()   // a live workout counts right away
+                wasLive = s.liveRequested
                 if (wasSyncing && !s.syncing) {
                     val a = s.address
                     val run = s.sync?.runId?.takeIf { it > 0 }
@@ -103,6 +106,14 @@ class BloopApplication : Application() {
                 }
                 wasSyncing = s.syncing
             }
+        }
+    }
+
+    /** Recompute today (Strain screen refresh, end of a live session). */
+    fun recomputeToday() {
+        scope.launch {
+            val a = band.status.value.address ?: return@launch
+            analytics.recompute(a, java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())
         }
     }
 

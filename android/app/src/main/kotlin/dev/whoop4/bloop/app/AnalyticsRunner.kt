@@ -42,6 +42,11 @@ object MetricKeys {
     const val TRIMP = "trimp"
     const val HR_P999 = "hr_p999"                     // the day's 99.9th percentile HR, for the observed-max estimate
     const val HR_AVG = "hr_avg"
+    const val STRAIN_DATA_MIN = "strain_data_min"     // minutes of the day with heart rate
+    const val STRAIN_LAST_MS = "strain_last_ms"       // newest sample used, epoch ms
+    const val STRAIN_LIVE_MIN = "strain_live_min"     // of which filled in from live readings
+    const val ZONE_REST = "zone_rest_bpm"
+    const val ZONE_MAX = "zone_max_bpm"
     fun zoneMinutes(z: Int) = "zone${z}_min"
 }
 
@@ -51,7 +56,8 @@ object MetricKeys {
  *    resting HR are computed (core:analytics) and stored with their method and confidence;
  *  - **recovery** compares that night with the previous 28 days' stored values;
  *  - **strain** covers D from midnight to midnight (so far, for today).
- * Only band-stored (HISTORICAL) samples are used: live readings duplicate them and have no motion data.
+ * Sleep uses only band-stored (HISTORICAL) samples (live readings have no motion data). Strain also uses live
+ * readings where the band-stored data has a gap (e.g. a workout recorded live that hasn't been synced yet).
  * A metric that cannot be computed is deleted for that day, so the UI never shows a stale number.
  */
 class AnalyticsRunner(private val db: BloopDatabase, private val settings: Settings, private val log: DebugLog) {
@@ -143,7 +149,9 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         (recovery as? Metric.Estimated)?.let { put(MetricKeys.RECOVERY, it.value.score, MetricKind.ESTIMATED, it.method, it.confidence) }
 
         // ---- day: strain, zones, HR summary
-        val dayHr = hr.filter { it.tsMs in dayStart until dayEnd }
+        val storedDayHr = hr.filter { it.tsMs in dayStart until dayEnd }
+        val liveFill = liveGapFill(device, storedDayHr, dayStart, dayEnd)
+        val dayHr = if (liveFill.isEmpty()) storedDayHr else (storedDayHr + liveFill).sortedBy { it.tsMs }
         if (dayHr.isNotEmpty()) {
             val sorted = dayHr.map { it.hr.toDouble() }.sorted()
             put(MetricKeys.HR_AVG, sorted.average(), MetricKind.DERIVED, "mean", null)
@@ -154,8 +162,19 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         if (strain is Metric.Estimated) {
             put(MetricKeys.STRAIN, strain.value.score, MetricKind.ESTIMATED, strain.method, strain.confidence)
             put(MetricKeys.TRIMP, strain.value.trimp, MetricKind.ESTIMATED, strain.method, strain.confidence)
-            for (z in 1..5) put(MetricKeys.zoneMinutes(z), strain.value.zoneMinutes[z], MetricKind.DERIVED, "karvonen", null)
+            for (z in 1..5) put(MetricKeys.zoneMinutes(z), strain.value.zoneMinutes[z], MetricKind.DERIVED, "pct-hrmax", null)
+            put(MetricKeys.STRAIN_DATA_MIN, strain.value.minutesWithData, MetricKind.DERIVED, "coverage", null)
+            put(MetricKeys.STRAIN_LAST_MS, strain.value.lastSampleMs.toDouble(), MetricKind.MEASURED, "band", null)
+            put(MetricKeys.STRAIN_LIVE_MIN, liveFill.size / 60.0, MetricKind.DERIVED, "live-gap-fill", null)
+            put(MetricKeys.ZONE_REST, strain.value.restBpm, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null)
+            put(MetricKeys.ZONE_MAX, strain.value.maxBpm, MetricKind.DERIVED, maxHr(history, storedDayHr)?.source ?: "", null)
         }
+        log.i("analytics $day strain: ${storedDayHr.size} stored + ${liveFill.size} live samples, " + when (strain) {
+            is Metric.Estimated -> "%.1f, zones %s min, data %.0f min".format(strain.value.score,
+                (1..5).joinToString("/") { "%.0f".format(strain.value.zoneMinutes[it]) }, strain.value.minutesWithData)
+            is Metric.Missing -> "none: ${strain.reason}"
+            else -> "?"
+        })
 
         val coverage = dayHr.size / ((minOf(dayEnd, now) - dayStart).coerceAtLeast(1) / 1000.0)
         db.withTransaction {
@@ -177,6 +196,31 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         }
     }
 
+    /**
+     * Live readings (Heart Rate service, ~1/s) for the seconds the band-stored data doesn't cover, so a workout
+     * done with "Go live" counts before the next sync brings the band's own copy.
+     */
+    private suspend fun liveGapFill(device: String, stored: List<HrPoint>, from: Long, to: Long): List<HrPoint> {
+        val live = db.samples().samplesBetween(device, SampleSource.LIVE, from, to).filter { it.hr > 0 }
+        if (live.isEmpty()) return emptyList()
+        val ts = stored.map { it.tsMs }.toLongArray().also { it.sort() }
+        fun covered(t: Long): Boolean {
+            var i = java.util.Arrays.binarySearch(ts, t)
+            if (i >= 0) return true
+            i = -i - 1
+            return (i < ts.size && ts[i] - t <= LIVE_MATCH_MS) || (i > 0 && t - ts[i - 1] <= LIVE_MATCH_MS)
+        }
+        val out = ArrayList<HrPoint>()
+        var lastKept = Long.MIN_VALUE / 2
+        for (s in live) {   // ordered by time; skip duplicates under a second apart
+            if (covered(s.tsUtcMs) || s.tsUtcMs - lastKept < 900) continue
+            out += HrPoint(s.tsUtcMs, s.hr); lastKept = s.tsUtcMs
+        }
+        return out
+    }
+
+    private fun Metric<Double>.methodOrEmpty() = when (this) { is Metric.Derived -> method; is Metric.Estimated -> method; else -> "" }
+
     /** Resting HR for zones: median of the last 7 nights' values (including tonight's), so one odd night doesn't move the zones. */
     private fun restingBaseline(nights: List<NightValues>, tonight: Double?): Metric<Double> {
         val recent = (nights.sortedByDescending { it.dayIndex }.mapNotNull { it.restingHr }.take(6) + listOfNotNull(tonight)).sorted()
@@ -196,5 +240,6 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
 
     private companion object {
         const val MAX_DAYS = 60L
+        const val LIVE_MATCH_MS = 2_500L
     }
 }

@@ -76,7 +76,7 @@ class BandManager(
                     return@collect
                 }
                 if (_status.value.syncing) return@collect
-                if (logged < 200) { logged++; log.rx("unsolicited type=0x%02x cmd=0x%02x %s".format(p.type, p.cmd, f.hex())) }
+                if (logged < 200 || _status.value.buzzing) { logged++; log.rx("unsolicited type=0x%02x cmd=0x%02x %s".format(p.type, p.cmd, f.hex())) }
                 if (p.type == PacketType.EVENT) _status.value.address?.let { a -> runCatching { storeFor(a).storeBatch(0, listOf(f)) } }
             }
         }
@@ -218,20 +218,26 @@ class BandManager(
 
     // ------------------------------------------------------------------ haptics (wake alarm)
 
+    @Volatile private var stopBuzzRequested = false
+
     /**
      * Connects (retrying until [deadlineMs]) and sends RUN_ALARM so the band vibrates. Returns true once the
-     * command was written. Disconnects afterwards unless a live session or sync is using the link.
+     * command was written. The link then stays open for up to [BUZZ_HOLD_MS] (until [stopBuzz]), so a stop is
+     * sent at once instead of after a reconnect; afterwards it disconnects unless a live session or sync uses it.
      */
     suspend fun buzz(reason: String, deadlineMs: Long = System.currentTimeMillis() + 60_000): Boolean {
         if (_status.value.address == null) { log.w("buzz ($reason): no band selected"); return false }
+        stopBuzzRequested = false
         _status.update { it.copy(buzzing = true) }
+        var sent = false
         try {
-            while (true) {
+            while (!stopBuzzRequested) {
                 try {
                     ensureConnected()
                     link.write(ExperimentalCommands.runAlarm().also { log.tx("EXPERIMENTAL RUN_ALARM ($reason)", it) })
                     log.i("buzz ($reason): RUN_ALARM written")
-                    return true
+                    sent = true
+                    break
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     log.w("buzz ($reason): ${e.message}")
@@ -239,18 +245,25 @@ class BandManager(
                     delay(5_000)
                 }
             }
+            if (sent) withTimeoutOrNull(BUZZ_HOLD_MS) { while (!stopBuzzRequested) delay(200) }
+            return sent
         } finally {
-            delay(3_000)   // let the command and any response through before disconnecting
             _status.update { it.copy(buzzing = false) }
-            if (!_status.value.liveRequested && !_status.value.syncing) runCatching { link.disconnect() }
+            delay(2_000)   // let a stop command and any response through before disconnecting
+            if (!_status.value.liveRequested && !_status.value.syncing && !_status.value.buzzing) runCatching { link.disconnect() }
         }
     }
 
+    /** Stops the vibration: STOP_HAPTICS, then DISABLE_ALARM (both unconfirmed, both logged with any reply). */
     fun stopBuzz() {
+        stopBuzzRequested = true
+        log.i("stop buzz: requested")
         scope.launch {
             runCatching {
                 ensureConnected()
                 link.write(ExperimentalCommands.stopHaptics().also { log.tx("EXPERIMENTAL STOP_HAPTICS", it) })
+                delay(300)
+                link.write(ExperimentalCommands.disableAlarm().also { log.tx("EXPERIMENTAL DISABLE_ALARM", it) })
                 delay(2_000)
             }.onFailure { log.w("stop buzz: ${it.message}") }
             if (!_status.value.liveRequested && !_status.value.syncing && !_status.value.buzzing) runCatching { link.disconnect() }
@@ -259,5 +272,6 @@ class BandManager(
 
     private companion object {
         const val STREAM_FALLBACK_MS = 5_000L
+        const val BUZZ_HOLD_MS = 90_000L
     }
 }

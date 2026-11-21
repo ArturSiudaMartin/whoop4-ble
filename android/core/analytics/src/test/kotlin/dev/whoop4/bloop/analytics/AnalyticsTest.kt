@@ -198,6 +198,22 @@ class StrainTest {
         assertEquals(5, Zones.zone(185, 60.0, 190.0))
     }
 
+    @Test fun displayZonesArePercentOfMax() {
+        assertEquals(0, Zones.ofMax(90, 190.0))    // 47 %
+        assertEquals(1, Zones.ofMax(100, 190.0))   // 53 %
+        assertEquals(3, Zones.ofMax(140, 190.0))   // 74 %
+        assertEquals(5, Zones.ofMax(175, 190.0))   // 92 %
+    }
+
+    @Test fun displayMinutesVsTrimpZones() {
+        // 140 bpm with rest 60 / max 190: zone 3 of max HR (74 %), zone 2 of HRR (61.5 %)
+        val pts = (0 until 600).map { HrPoint(it * 1000L, 140) }
+        val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated
+        assertEquals(10.0, s.value.zoneMinutes[3], 0.05)
+        assertEquals(2 * 10.0, s.value.trimp, 0.1)
+        assertEquals(10.0, s.value.minutesWithData, 0.05)
+    }
+
     @Test fun oneHourZoneThree() {
         val pts = (0 until 3600).map { HrPoint(it * 1000L, 160) }
         val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated

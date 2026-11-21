@@ -24,7 +24,10 @@ object ExperimentalCommands {
     // Bloop sends them only when the user taps "Test buzz" or their alarm fires; results are logged.
     const val RUN_ALARM = 0x44
     const val STOP_HAPTICS = 0x7A
+    /** DISABLE_ALARM = 69 in the same table; sent after STOP_HAPTICS in case the buzz is an alarm the band keeps running. */
+    const val DISABLE_ALARM = 0x45
 
     fun runAlarm(): ByteArray = Framing.frame(PacketType.COMMAND, 0, RUN_ALARM, byteArrayOf(0x00))
     fun stopHaptics(): ByteArray = Framing.frame(PacketType.COMMAND, 0, STOP_HAPTICS, byteArrayOf(0x00))
+    fun disableAlarm(): ByteArray = Framing.frame(PacketType.COMMAND, 0, DISABLE_ALARM, byteArrayOf(0x00))
 }

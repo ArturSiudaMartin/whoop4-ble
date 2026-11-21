@@ -164,8 +164,11 @@ fun SleepScreen() {
 
 @Composable
 fun StrainScreen() {
+    val app = BloopApplication.from(LocalContext.current)
     val days = rememberDays()
     val today = days.firstOrNull()?.takeIf { it.first == LocalDate.now() }?.second.orEmpty()
+    val maxBpm = today[MetricKeys.ZONE_MAX]?.value
+    val restBpm = today[MetricKeys.ZONE_REST]?.value
     Page {
         BigRing("Strain", BloopColors.Caution, today[MetricKeys.STRAIN]?.let { it.value / 21 }, today[MetricKeys.STRAIN]?.let { "%.1f".format(it.value) })
         if (today[MetricKeys.STRAIN] == null) Text(
@@ -173,20 +176,47 @@ fun StrainScreen() {
             color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium,
         )
         CardBox(Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Heart-rate zones today", style = MaterialTheme.typography.titleMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Time in heart-rate zones today", style = MaterialTheme.typography.titleMedium)
                 val zoneColors = listOf(BloopColors.Muted, BloopColors.Sleep, BloopColors.Recovery, BloopColors.Caution, BloopColors.Strain)
                 val mins = (1..5).map { today[MetricKeys.zoneMinutes(it)]?.value }
                 val top = mins.filterNotNull().maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-                for (z in 1..5) ZoneBar("Zone $z", mins[z - 1], top, zoneColors[z - 1])
+                for (z in 1..5) {
+                    val lo = maxBpm?.let { "%.0f".format(it * dev.whoop4.bloop.analytics.Zones.lowerFraction(z)) }
+                    val hi = maxBpm?.let { if (z == 5) "max" else "%.0f".format(it * dev.whoop4.bloop.analytics.Zones.lowerFraction(z + 1) - 1) }
+                    ZoneBar("Zone $z", if (lo != null) "$lo–$hi bpm" else "${40 + 10 * z}–${50 + 10 * z} % max", mins[z - 1], top, zoneColors[z - 1])
+                }
+                val inZones = mins.filterNotNull().sum()
+                if (today[MetricKeys.STRAIN_DATA_MIN] != null) Row2("Total in zones 1–5", fmtMinutes(inZones))
+            }
+        }
+        CardBox(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Today's data", style = MaterialTheme.typography.titleMedium)
+                Row2("Heart rate recorded", today[MetricKeys.STRAIN_DATA_MIN]?.let { fmtMinutes(it.value) } ?: "—")
+                today[MetricKeys.STRAIN_LIVE_MIN]?.takeIf { it.value >= 1 }?.let { Row2("   of which from live readings", fmtMinutes(it.value)) }
+                Row2("Latest reading", today[MetricKeys.STRAIN_LAST_MS]?.let { fmtClock(it.value) } ?: "—")
+                Row2("Max heart rate used", maxBpm?.let { "%.0f bpm".format(it) } ?: "—")
+                today[MetricKeys.ZONE_MAX]?.method?.takeIf { it.isNotEmpty() }?.let { Row2("", it, BloopColors.Muted) }
+                Row2("Resting heart rate used", restBpm?.let { "%.0f bpm".format(it) } ?: "—")
                 MetricRow("Average heart rate", today[MetricKeys.HR_AVG]) { "%.0f bpm".format(it) }
                 MetricRow("TRIMP (Edwards)", today[MetricKeys.TRIMP]) { "%.0f".format(it) }
+                Text("Minutes only count once the band's data is on the phone: sync after a workout (or record it with Go live). " +
+                    "If the zones look too low, set your age on the Device screen so the max heart rate isn't guessed.",
+                    color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                SecondaryButton("Recalculate today", Modifier.fillMaxWidth()) { app.recomputeToday() }
             }
         }
         History("Last 14 days", days.take(14), MetricKeys.STRAIN, BloopColors.Caution, 21.0) { "%.1f".format(it) }
-        InfoCard("How strain works", "Edwards TRIMP: minutes in each heart-rate-reserve zone × the zone number, on Bloop's own 0–21 scale " +
-            "(21 × (1 − e^(−TRIMP/250))). Zones use your resting HR and your maximum HR (from your age, or the highest seen).")
+        InfoCard("How strain works", "Zones are % of your maximum heart rate: zone 1 is 50–60 %, zone 2 60–70 %, zone 3 70–80 %, " +
+            "zone 4 80–90 % and zone 5 above 90 %. The strain score is Edwards TRIMP (minutes in each heart-rate-reserve zone × the zone " +
+            "number, which uses your resting HR too, so everyday walking adds little), on Bloop's own 0–21 scale: 21 × (1 − e^(−TRIMP/250)).")
     }
+}
+
+private fun fmtMinutes(m: Double): String {
+    val t = m.toLong()
+    return if (t < 60) "$t min" else "%dh %02dm".format(t / 60, t % 60)
 }
 
 // ------------------------------------------------------------------ last night's data + wake alarm
@@ -271,7 +301,7 @@ private fun WakeAlarmCard() {
                     color = if (enabled) BloopColors.OnSurface else BloopColors.Muted)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SecondaryButton("Test buzz", Modifier.weight(1f), enabled = s.address != null && !s.buzzing) {
+                SecondaryButton(if (s.buzzing) "Buzzing…" else "Test buzz", Modifier.weight(1f), enabled = s.address != null && !s.buzzing) {
                     BandService.ensureRunning(ctx)
                     app.scope.launch { app.band.buzz("test") }
                 }
@@ -333,12 +363,15 @@ private fun CalibratingNote(nights: Int) = Text(
 )
 
 @Composable
-private fun ZoneBar(label: String, minutes: Double?, top: Double, color: Color) = Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    Text(label, color = BloopColors.Muted, modifier = Modifier.width(64.dp), style = MaterialTheme.typography.bodyMedium)
+private fun ZoneBar(label: String, range: String, minutes: Double?, top: Double, color: Color) = Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.width(96.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(range, color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
+    }
     Box(Modifier.weight(1f).height(10.dp).background(BloopColors.SurfaceHigh, RoundedCornerShape(5.dp))) {
         if (minutes != null && minutes > 0) Box(Modifier.fillMaxWidth((minutes / top).toFloat().coerceIn(0.02f, 1f)).height(10.dp).background(color, RoundedCornerShape(5.dp)))
     }
-    Text(minutes?.let { "%.0f min".format(it) } ?: "—", modifier = Modifier.width(64.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium)
+    Text(minutes?.let { fmtMinutes(it) } ?: "—", modifier = Modifier.width(72.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium)
 }
 
 /** One bar per day for [key]; days without a value are shown as an empty slot. */
