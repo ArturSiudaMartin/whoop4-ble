@@ -214,6 +214,19 @@ class StrainTest {
         assertEquals(10.0, s.value.minutesWithData, 0.05)
     }
 
+    @Test fun customZones() {
+        val b = listOf(125, 140, 155, 170, 185)
+        assertEquals(0, Zones.ofBounds(124, b))
+        assertEquals(2, Zones.ofBounds(140, b))
+        assertEquals(2, Zones.ofBounds(154, b))
+        assertEquals(3, Zones.ofBounds(155, b))
+        assertEquals(5, Zones.ofBounds(200, b))
+        val pts = (0 until 600).map { HrPoint(it * 1000L, 145) }
+        val s = Strain.of(pts, 0, HOUR, Metric.Missing("no rest"), null, b) as Metric.Estimated
+        assertEquals(10.0, s.value.zoneMinutes[2], 0.05)
+        assertEquals(20.0, s.value.trimp, 0.1)
+    }
+
     @Test fun oneHourZoneThree() {
         val pts = (0 until 3600).map { HrPoint(it * 1000L, 160) }
         val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated

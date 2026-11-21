@@ -365,6 +365,10 @@ private fun shareLog(ctx: Context, app: BloopApplication) {
 private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()) {
     var ageText by remember { mutableStateOf(app.settings.age?.toString().orEmpty()) }
     var need by remember { mutableStateOf(app.settings.sleepNeedHours) }
+    var customZones by remember { mutableStateOf(app.settings.zoneBounds != null) }
+    val zoneText = remember { (app.settings.zoneBounds ?: DEFAULT_ZONES).map { mutableStateOf(it.toString()) } }
+    val bounds = zoneText.map { it.value.toIntOrNull() }
+    val zonesValid = bounds.all { it != null && it in 40..240 } && bounds.filterNotNull().zipWithNext().all { (a, b) -> a < b }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Profile", style = MaterialTheme.typography.titleMedium)
         androidx.compose.material3.OutlinedTextField(
@@ -381,9 +385,32 @@ private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()
             Text("%dh %02dm".format(need.toInt(), ((need % 1) * 60).toInt()))
             TextButton({ need = (need + 0.25).coerceAtMost(12.0) }) { Text("+") }
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Custom heart-rate zones")
+                Text("Set where each zone starts, in bpm", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+            androidx.compose.material3.Switch(customZones, onCheckedChange = { customZones = it })
+        }
+        if (customZones) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (z in 0 until 5) androidx.compose.material3.OutlinedTextField(
+                    value = zoneText[z].value,
+                    onValueChange = { v -> zoneText[z].value = v.filter { it.isDigit() }.take(3) },
+                    label = { Text("Z${z + 1}") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(if (zonesValid) (0 until 5).joinToString("   ") { z -> "Z${z + 1}: ${bounds[z]}" + if (z < 4) "–${bounds[z + 1]!! - 1}" else "+" }
+                else "Each zone must start higher than the one before (40–240 bpm).",
+                color = if (zonesValid) BloopColors.Muted else BloopColors.Strain, style = MaterialTheme.typography.labelSmall)
+        }
         Text("Only used on this phone. Without an age, maximum heart rate is estimated from the highest heart rate seen, which makes strain read high.",
             color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
-        PrimaryButton("Save and recompute metrics") {
+        PrimaryButton("Save and recompute metrics", enabled = !customZones || zonesValid) {
+            app.settings.zoneBounds = if (customZones && zonesValid) bounds.filterNotNull() else null
             app.settings.age = ageText.toIntOrNull()?.takeIf { it in 10..100 }
             app.settings.sleepNeedHours = need
             app.recomputeAll()
@@ -391,3 +418,5 @@ private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()
     }
 }
 
+/** Starting values for custom zones: zone 2 = 140–154 bpm, 15 bpm per zone. */
+private val DEFAULT_ZONES = listOf(125, 140, 155, 170, 185)

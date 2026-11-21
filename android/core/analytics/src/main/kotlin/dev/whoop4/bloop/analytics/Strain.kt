@@ -31,6 +31,9 @@ object Zones {
         }
     }
 
+    /** User-defined zones: [lower] holds the lower bound in bpm of zones 1..5, ascending. */
+    fun ofBounds(hr: Int, lower: List<Int>): Int = lower.indexOfLast { hr >= it } + 1
+
     /** Karvonen heart-rate-reserve zones (stricter, used only for TRIMP): zone k covers 50+10(k−1) % to 60+10(k−1) % of HRR. */
     fun zone(hr: Int, rest: Double, max: Double): Int {
         if (max <= rest) return 0
@@ -76,9 +79,14 @@ object Strain {
 
     fun scale(trimp: Double) = 21 * (1 - exp(-trimp / SCALE_K))
 
-    fun of(hr: List<HrPoint>, fromMs: Long, toMs: Long, rest: Metric<Double>, max: HrMax?): Metric<StrainResult> {
-        val r = rest.valueOrNull ?: return Metric.Missing("needs a resting heart rate (one night of sleep data)")
-        val m = max ?: return Metric.Missing("needs your age, or 3 days of data to estimate your maximum heart rate")
+    /**
+     * With [customZones] (bpm lower bounds of zones 1..5), those zones are used for both the displayed minutes
+     * and TRIMP, and no resting or maximum HR is needed.
+     */
+    fun of(hr: List<HrPoint>, fromMs: Long, toMs: Long, rest: Metric<Double>, max: HrMax?, customZones: List<Int>? = null): Metric<StrainResult> {
+        val custom = customZones?.takeIf { it.size == 5 }
+        val r = rest.valueOrNull ?: if (custom != null) 0.0 else return Metric.Missing("needs a resting heart rate (one night of sleep data)")
+        val m = max ?: if (custom != null) HrMax(0.0, "custom zones", 1.0) else return Metric.Missing("needs your age, or 3 days of data to estimate your maximum heart rate")
         val pts = hr.filter { it.tsMs in fromMs until toMs && it.hr in 25..240 }.sortedBy { it.tsMs }
         if (pts.isEmpty()) return Metric.Missing("no heart rate in this period")
         val minutes = DoubleArray(6)      // %HRmax display zones
@@ -88,12 +96,17 @@ object Strain {
             val next = if (i + 1 < pts.size) pts[i + 1].tsMs else pts[i].tsMs + 1000
             val dt = (next - pts[i].tsMs).coerceIn(0, MAX_DT_MS)
             covered += dt
-            minutes[Zones.ofMax(pts[i].hr, m.bpm)] += dt / 60_000.0
-            hrrMinutes[Zones.zone(pts[i].hr, r, m.bpm)] += dt / 60_000.0
+            if (custom != null) {
+                val z = Zones.ofBounds(pts[i].hr, custom)
+                minutes[z] += dt / 60_000.0; hrrMinutes[z] += dt / 60_000.0
+            } else {
+                minutes[Zones.ofMax(pts[i].hr, m.bpm)] += dt / 60_000.0
+                hrrMinutes[Zones.zone(pts[i].hr, r, m.bpm)] += dt / 60_000.0
+            }
         }
         val trimp = (1..5).sumOf { it * hrrMinutes[it] }
         val coverage = covered.toDouble() / (toMs - fromMs)
-        val confidence = (coverage.coerceAtMost(1.0)) * m.confidence * rest.confidenceOrZero.coerceAtLeast(0.5)
+        val confidence = (coverage.coerceAtMost(1.0)) * (if (custom != null) 1.0 else m.confidence * rest.confidenceOrZero.coerceAtLeast(0.5))
         return Metric.Estimated(StrainResult(scale(trimp), trimp, minutes.toList(), coverage,
             covered / 60_000.0, pts.last().tsMs, r, m.bpm), METHOD, confidence.coerceIn(0.0, 1.0))
     }

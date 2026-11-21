@@ -181,7 +181,12 @@ fun StrainScreen() {
                 val zoneColors = listOf(BloopColors.Muted, BloopColors.Sleep, BloopColors.Recovery, BloopColors.Caution, BloopColors.Strain)
                 val mins = (1..5).map { today[MetricKeys.zoneMinutes(it)]?.value }
                 val top = mins.filterNotNull().maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+                val custom = app.settings.zoneBounds
                 for (z in 1..5) {
+                    if (custom != null) {
+                        ZoneBar("Zone $z", if (z < 5) "${custom[z - 1]}–${custom[z] - 1} bpm" else "${custom[4]}+ bpm", mins[z - 1], top, zoneColors[z - 1])
+                        continue
+                    }
                     val lo = maxBpm?.let { "%.0f".format(it * dev.whoop4.bloop.analytics.Zones.lowerFraction(z)) }
                     val hi = maxBpm?.let { if (z == 5) "max" else "%.0f".format(it * dev.whoop4.bloop.analytics.Zones.lowerFraction(z + 1) - 1) }
                     ZoneBar("Zone $z", if (lo != null) "$lo–$hi bpm" else "${40 + 10 * z}–${50 + 10 * z} % max", mins[z - 1], top, zoneColors[z - 1])
@@ -208,7 +213,8 @@ fun StrainScreen() {
             }
         }
         History("Last 14 days", days.take(14), MetricKeys.STRAIN, BloopColors.Caution, 21.0) { "%.1f".format(it) }
-        InfoCard("How strain works", "Zones are % of your maximum heart rate: zone 1 is 50–60 %, zone 2 60–70 %, zone 3 70–80 %, " +
+        InfoCard("How strain works", if (app.settings.zoneBounds != null) "Zones are your custom bpm ranges (Device screen → Profile). " +
+            "The strain score is Edwards TRIMP: minutes in each zone × the zone number, on Bloop's own 0–21 scale: 21 × (1 − e^(−TRIMP/250))." else "Zones are % of your maximum heart rate: zone 1 is 50–60 %, zone 2 60–70 %, zone 3 70–80 %, " +
             "zone 4 80–90 % and zone 5 above 90 %. The strain score is Edwards TRIMP (minutes in each heart-rate-reserve zone × the zone " +
             "number, which uses your resting HR too, so everyday walking adds little), on Bloop's own 0–21 scale: 21 × (1 − e^(−TRIMP/250)).")
     }

@@ -158,16 +158,16 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
             if (dayHr.size >= 600) put(MetricKeys.HR_P999, sorted[((sorted.size - 1) * 0.999).toInt()], MetricKind.DERIVED, "p99.9", null)
         }
         val restingForStrain = restingBaseline(nights, night.restingHr.valueOrNull?.bpm)
-        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxHr(history, dayHr))
+        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxHr(history, dayHr), settings.zoneBounds)
         if (strain is Metric.Estimated) {
             put(MetricKeys.STRAIN, strain.value.score, MetricKind.ESTIMATED, strain.method, strain.confidence)
             put(MetricKeys.TRIMP, strain.value.trimp, MetricKind.ESTIMATED, strain.method, strain.confidence)
-            for (z in 1..5) put(MetricKeys.zoneMinutes(z), strain.value.zoneMinutes[z], MetricKind.DERIVED, "pct-hrmax", null)
+            for (z in 1..5) put(MetricKeys.zoneMinutes(z), strain.value.zoneMinutes[z], MetricKind.DERIVED, if (settings.zoneBounds != null) "custom-bpm" else "pct-hrmax", null)
             put(MetricKeys.STRAIN_DATA_MIN, strain.value.minutesWithData, MetricKind.DERIVED, "coverage", null)
             put(MetricKeys.STRAIN_LAST_MS, strain.value.lastSampleMs.toDouble(), MetricKind.MEASURED, "band", null)
             put(MetricKeys.STRAIN_LIVE_MIN, liveFill.size / 60.0, MetricKind.DERIVED, "live-gap-fill", null)
-            put(MetricKeys.ZONE_REST, strain.value.restBpm, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null)
-            put(MetricKeys.ZONE_MAX, strain.value.maxBpm, MetricKind.DERIVED, maxHr(history, storedDayHr)?.source ?: "", null)
+            if (settings.zoneBounds == null) put(MetricKeys.ZONE_REST, strain.value.restBpm, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null)
+            if (settings.zoneBounds == null) put(MetricKeys.ZONE_MAX, strain.value.maxBpm, MetricKind.DERIVED, maxHr(history, storedDayHr)?.source ?: "", null)
         }
         log.i("analytics $day strain: ${storedDayHr.size} stored + ${liveFill.size} live samples, " + when (strain) {
             is Metric.Estimated -> "%.1f, zones %s min, data %.0f min".format(strain.value.score,

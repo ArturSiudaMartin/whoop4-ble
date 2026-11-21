@@ -158,6 +158,11 @@ class Settings(c: Context) {
         get() = p.getInt("age", -1).takeIf { it > 0 }
         set(v) = p.edit().putInt("age", v ?: -1).apply()
     /** Sleep need for sleep performance; 8 h unless the user changes it. */
+    /** Custom zone lower bounds in bpm for zones 1..5 (ascending), or null for % of max HR. */
+    var zoneBounds: List<Int>?
+        get() = p.getString("zoneBounds", null)?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 5 && it.zipWithNext().all { (a, b) -> a < b } }
+        set(v) = p.edit().putString("zoneBounds", v?.joinToString(",")).apply()
+
     var sleepNeedHours: Double
         get() = p.getFloat("sleepNeedHours", 8f).toDouble()
         set(v) = p.edit().putFloat("sleepNeedHours", v.toFloat()).apply()
