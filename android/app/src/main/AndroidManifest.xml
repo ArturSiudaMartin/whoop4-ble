@@ -19,6 +19,8 @@
 
     <!-- Only for uploading sessions to Strava when the user connects it -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- In-app updates: install a newer Bloop release downloaded from GitHub -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
@@ -61,6 +63,8 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <receiver android:name=".app.UpdateResultReceiver" android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

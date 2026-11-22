@@ -23,6 +23,7 @@ class BloopApplication : Application() {
     lateinit var settings: Settings; private set
     lateinit var analytics: AnalyticsRunner; private set
     lateinit var strava: Strava; private set
+    lateinit var updater: Updater; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -41,6 +42,7 @@ class BloopApplication : Application() {
         band = BandManager(this, log, scope) { address -> RoomSyncStore(db, ingest, address) }
         analytics = AnalyticsRunner(db, settings, log)
         strava = Strava(settings, log)
+        updater = Updater(this, settings, log)
 
         scope.launch { db.syncRuns().markInterrupted(System.currentTimeMillis()).takeIf { it > 0 }?.let { log.w("$it interrupted sync run(s) marked PARTIAL") } }
         // Live measurements are stored as they arrive.
@@ -217,6 +219,10 @@ class Settings(c: Context) {
     /** Strava activity ID a session was uploaded as, or null. */
     fun stravaActivity(sessionId: Long): Long? = p.getLong("strava_$sessionId", 0).takeIf { it > 0 }
     fun setStravaActivity(sessionId: Long, activityId: Long?) = p.edit().putLong("strava_$sessionId", activityId ?: 0).apply()
+    /** When Bloop last asked GitHub for a newer release (epoch ms). */
+    var updateLastCheck: Long
+        get() = p.getLong("updateLastCheck", 0)
+        set(v) = p.edit().putLong("updateLastCheck", v).apply()
     var analyticsBackfilled: Boolean
         get() = p.getBoolean("analyticsBackfilled", false)
         set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()

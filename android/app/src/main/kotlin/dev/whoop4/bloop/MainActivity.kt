@@ -26,6 +26,13 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleStravaRedirect(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // At most once an hour: is there a newer Bloop release on GitHub?
+        val app = BloopApplication.from(this)
+        lifecycleScope.launch { app.updater.check(ifDue = true) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleStravaRedirect(intent)

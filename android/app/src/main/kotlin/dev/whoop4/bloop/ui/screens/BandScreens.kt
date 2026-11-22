@@ -278,6 +278,7 @@ fun DeviceScreen() {
         // ---- profile (inputs for the metrics)
         ProfileCard(app)
         StravaCard(app)
+        UpdateCard(onlyWhenAvailable = false)
 
         // ---- debug log
         DebugLogCard(app)

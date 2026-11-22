@@ -90,6 +90,7 @@ fun HomeScreen() {
     val days = rememberDays()
     val today = days.firstOrNull()?.takeIf { it.first == LocalDate.now() }?.second.orEmpty()
     Page {
+        UpdateCard(onlyWhenAvailable = true)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             RingTile("Recovery", BloopColors.Recovery, today[MetricKeys.RECOVERY]?.let { it.value / 100 }, today[MetricKeys.RECOVERY]?.let { "%.0f%%".format(it.value) }, Modifier.weight(1f))
             RingTile("Strain", BloopColors.Caution, today[MetricKeys.STRAIN]?.let { it.value / 21 }, today[MetricKeys.STRAIN]?.let { "%.1f".format(it.value) }, Modifier.weight(1f))
