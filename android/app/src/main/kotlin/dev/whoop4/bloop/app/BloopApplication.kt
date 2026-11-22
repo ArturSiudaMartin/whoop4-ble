@@ -183,6 +183,14 @@ class Settings(c: Context) {
     var alarmMinutes: Int?
         get() = p.getInt("alarmMinutes", -1).takeIf { it >= 0 }
         set(v) = p.edit().putInt("alarmMinutes", v ?: -1).apply()
+    /**
+     * Alarm time per weekday (index 0 = Monday) in minutes after midnight, null = no alarm that day. Before 0.4.2 there
+     * was one daily time ([alarmMinutes]); it becomes the time for every day.
+     */
+    var alarmDays: List<Int?>
+        get() = p.getString("alarmDays", null)?.split(",")?.map { it.toIntOrNull() }?.takeIf { it.size == 7 }
+            ?: List(7) { alarmMinutes }
+        set(v) = p.edit().putString("alarmDays", v.joinToString(",") { it?.toString().orEmpty() }).apply()
     /** The running activity session started Live, so ending the session stops Live too. */
     var sessionStartedLive: Boolean
         get() = p.getBoolean("sessionStartedLive", false)

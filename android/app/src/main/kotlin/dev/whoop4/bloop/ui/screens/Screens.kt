@@ -3,6 +3,7 @@ package dev.whoop4.bloop.ui.screens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -295,27 +296,60 @@ private fun WakeAlarmCard() {
     val app = BloopApplication.from(ctx)
     val s = app.band.status.collectAsState().value
     var enabled by remember { mutableStateOf(app.settings.alarmEnabled) }
-    var minutes by remember { mutableStateOf(app.settings.alarmMinutes ?: (7 * 60)) }
-    var picking by remember { mutableStateOf(false) }
+    var days by remember { mutableStateOf(app.settings.alarmDays) }
+    var lastTime by remember { mutableStateOf(days.firstNotNullOfOrNull { it } ?: app.settings.alarmMinutes ?: (7 * 60)) }
+    var picking by remember { mutableStateOf<Int?>(null) }   // weekday index being edited
+    var next by remember { mutableStateOf(WakeAlarm.next(ctx)) }
     fun save() {
-        app.settings.alarmEnabled = enabled; app.settings.alarmMinutes = minutes
+        app.settings.alarmEnabled = enabled; app.settings.alarmDays = days
         WakeAlarm.reschedule(ctx)
+        next = WakeAlarm.next(ctx)
     }
+    val locale = java.util.Locale.getDefault()
+    val names = java.time.DayOfWeek.entries.map { it.getDisplayName(java.time.format.TextStyle.FULL, locale) }
+    val short = java.time.DayOfWeek.entries.map { it.getDisplayName(java.time.format.TextStyle.SHORT, locale).take(2) }
+    fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
 
     CardBox(Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Wake alarm", style = MaterialTheme.typography.titleMedium)
-                    Text("The band vibrates at this time every day", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                    Text(next?.let { "Next buzz: " + it.format(DateTimeFormatter.ofPattern("EEEE HH:mm")) }
+                        ?: if (enabled) "Choose at least one day" else "Off",
+                        color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 }
                 Switch(enabled, onCheckedChange = { enabled = it; save() }, enabled = s.address != null,
                     colors = SwitchDefaults.colors(checkedTrackColor = BloopColors.Sleep))
             }
-            TextButton({ picking = true }) {
-                Text("%02d:%02d".format(minutes / 60, minutes % 60), style = MaterialTheme.typography.displayLarge,
-                    color = if (enabled) BloopColors.OnSurface else BloopColors.Muted)
+            // one toggle per weekday
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                for (d in 0 until 7) {
+                    val on = days[d] != null
+                    Box(
+                        Modifier.size(40.dp)
+                            .background(if (on) BloopColors.Sleep else BloopColors.SurfaceHigh, androidx.compose.foundation.shape.CircleShape)
+                            .clickable {
+                                days = days.toMutableList().also { it[d] = if (on) null else lastTime }
+                                if (!on) enabled = true
+                                save()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(short[d], color = if (on) BloopColors.Background else BloopColors.Muted, style = MaterialTheme.typography.bodyMedium) }
+                }
             }
+            // the time for each chosen day; tap to change it
+            for (d in 0 until 7) {
+                val m = days[d] ?: continue
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(names[d], modifier = Modifier.weight(1f), color = if (enabled) BloopColors.OnSurface else BloopColors.Muted)
+                    TextButton({ picking = d }) {
+                        Text(hm(m), style = MaterialTheme.typography.headlineMedium, color = if (enabled) BloopColors.OnSurface else BloopColors.Muted)
+                    }
+                }
+            }
+            if (days.all { it == null }) Text("Tap the days you want the band to wake you, then tap a time to change it.",
+                color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SecondaryButton(if (s.buzzing) "Buzzing…" else "Test buzz", Modifier.weight(1f), enabled = s.address != null && !s.buzzing) {
                     BandService.ensureRunning(ctx)
@@ -323,18 +357,30 @@ private fun WakeAlarmCard() {
                 }
                 SecondaryButton("Stop buzz", Modifier.weight(1f), enabled = s.address != null) { BandService.ensureRunning(ctx); app.band.stopBuzz() }
             }
-            Text("Try Test buzz first: the buzz command comes from community research and has not been confirmed on your band yet. " +
-                "At alarm time Bloop connects to the band and makes it vibrate; the phone itself makes no sound. Keep Bluetooth on " +
-                "and the phone near you.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            Text("At alarm time Bloop connects to the band and makes it vibrate; the phone itself makes no sound. Keep Bluetooth on " +
+                "and the phone near you. Try Test buzz first.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
         }
     }
 
-    if (picking) {
-        val state = rememberTimePickerState(minutes / 60, minutes % 60, is24Hour = true)
+    picking?.let { d ->
+        val m = days[d] ?: lastTime
+        val state = rememberTimePickerState(m / 60, m % 60, is24Hour = true)
+        fun set(all: Boolean) {
+            val t = state.hour * 60 + state.minute
+            lastTime = t
+            days = days.mapIndexed { i, v -> if (i == d || (all && v != null)) t else v }
+            enabled = true; picking = null; save()
+        }
         AlertDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = { TextButton({ minutes = state.hour * 60 + state.minute; enabled = true; picking = false; save() }) { Text("Set") } },
-            dismissButton = { TextButton({ picking = false }) { Text("Cancel") } },
+            onDismissRequest = { picking = null },
+            title = { Text(names[d]) },
+            confirmButton = { TextButton({ set(false) }) { Text("Set") } },
+            dismissButton = {
+                Row {
+                    TextButton({ picking = null }) { Text("Cancel") }
+                    if (days.count { it != null } > 1) TextButton({ set(true) }) { Text("All days") }
+                }
+            },
             text = { TimePicker(state) },
             containerColor = BloopColors.Surface,
         )
