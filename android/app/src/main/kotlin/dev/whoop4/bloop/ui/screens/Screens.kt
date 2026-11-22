@@ -379,7 +379,7 @@ private fun CalibratingNote(nights: Int) = Text(
 )
 
 @Composable
-internal fun ZoneBar(label: String, range: String, minutes: Double?, top: Double, color: Color) = Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+internal fun ZoneBar(label: String, range: String, minutes: Double?, top: Double, color: Color, modifier: Modifier = Modifier) = Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     Column(Modifier.width(96.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text(range, color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)

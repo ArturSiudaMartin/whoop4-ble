@@ -22,6 +22,7 @@ class BloopApplication : Application() {
     lateinit var band: BandManager; private set
     lateinit var settings: Settings; private set
     lateinit var analytics: AnalyticsRunner; private set
+    lateinit var strava: Strava; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +40,7 @@ class BloopApplication : Application() {
         logLastExit()
         band = BandManager(this, log, scope) { address -> RoomSyncStore(db, ingest, address) }
         analytics = AnalyticsRunner(db, settings, log)
+        strava = Strava(settings, log)
 
         scope.launch { db.syncRuns().markInterrupted(System.currentTimeMillis()).takeIf { it > 0 }?.let { log.w("$it interrupted sync run(s) marked PARTIAL") } }
         // Live measurements are stored as they arrive.
@@ -185,6 +187,28 @@ class Settings(c: Context) {
     var sessionStartedLive: Boolean
         get() = p.getBoolean("sessionStartedLive", false)
         set(v) = p.edit().putBoolean("sessionStartedLive", v).apply()
+    // Strava: the user's own API application, and the tokens from signing in (kept only on this phone).
+    var stravaClientId: String?
+        get() = p.getString("stravaClientId", null)
+        set(v) = p.edit().putString("stravaClientId", v).apply()
+    var stravaClientSecret: String?
+        get() = p.getString("stravaClientSecret", null)
+        set(v) = p.edit().putString("stravaClientSecret", v).apply()
+    var stravaAccessToken: String?
+        get() = p.getString("stravaAccessToken", null)
+        set(v) = p.edit().putString("stravaAccessToken", v).apply()
+    var stravaRefreshToken: String?
+        get() = p.getString("stravaRefreshToken", null)
+        set(v) = p.edit().putString("stravaRefreshToken", v).apply()
+    var stravaAthlete: String?
+        get() = p.getString("stravaAthlete", null)
+        set(v) = p.edit().putString("stravaAthlete", v).apply()
+    var stravaExpiresAt: Long
+        get() = p.getLong("stravaExpiresAt", 0)
+        set(v) = p.edit().putLong("stravaExpiresAt", v).apply()
+    /** Strava activity ID a session was uploaded as, or null. */
+    fun stravaActivity(sessionId: Long): Long? = p.getLong("strava_$sessionId", 0).takeIf { it > 0 }
+    fun setStravaActivity(sessionId: Long, activityId: Long?) = p.edit().putLong("strava_$sessionId", activityId ?: 0).apply()
     var analyticsBackfilled: Boolean
         get() = p.getBoolean("analyticsBackfilled", false)
         set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()

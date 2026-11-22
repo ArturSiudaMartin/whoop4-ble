@@ -110,7 +110,11 @@ internal fun PrimaryButton(text: String, enabled: Boolean = true, color: Color =
 
 @Composable
 internal fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) =
-    OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.height(46.dp)) { Text(text, color = if (enabled) BloopColors.OnSurface else BloopColors.Muted) }
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.height(46.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)) {
+        Text(text, color = if (enabled) BloopColors.OnSurface else BloopColors.Muted, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
 
 @Composable
 internal fun Row2(label: String, value: String, valueColor: Color = BloopColors.OnSurface) = Row(Modifier.fillMaxWidth()) {
@@ -273,6 +277,7 @@ fun DeviceScreen() {
 
         // ---- profile (inputs for the metrics)
         ProfileCard(app)
+        StravaCard(app)
 
         // ---- debug log
         DebugLogCard(app)
