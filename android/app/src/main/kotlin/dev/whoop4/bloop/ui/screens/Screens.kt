@@ -169,6 +169,7 @@ fun StrainScreen() {
     val today = days.firstOrNull()?.takeIf { it.first == LocalDate.now() }?.second.orEmpty()
     val maxBpm = today[MetricKeys.ZONE_MAX]?.value
     val restBpm = today[MetricKeys.ZONE_REST]?.value
+    val custom = app.settings.zoneBounds
     Page {
         BigRing("Strain", BloopColors.Caution, today[MetricKeys.STRAIN]?.let { it.value / 21 }, today[MetricKeys.STRAIN]?.let { "%.1f".format(it.value) })
         if (today[MetricKeys.STRAIN] == null) Text(
@@ -181,7 +182,6 @@ fun StrainScreen() {
                 val zoneColors = listOf(BloopColors.Muted, BloopColors.Sleep, BloopColors.Recovery, BloopColors.Caution, BloopColors.Strain)
                 val mins = (1..5).map { today[MetricKeys.zoneMinutes(it)]?.value }
                 val top = mins.filterNotNull().maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-                val custom = app.settings.zoneBounds
                 for (z in 1..5) {
                     if (custom != null) {
                         ZoneBar("Zone $z", if (z < 5) "${custom[z - 1]}–${custom[z] - 1} bpm" else "${custom[4]}+ bpm", mins[z - 1], top, zoneColors[z - 1])
@@ -204,6 +204,11 @@ fun StrainScreen() {
                 Row2("Max heart rate used", maxBpm?.let { "%.0f bpm".format(it) } ?: "—")
                 today[MetricKeys.ZONE_MAX]?.method?.takeIf { it.isNotEmpty() }?.let { Row2("", it, BloopColors.Muted) }
                 Row2("Resting heart rate used", restBpm?.let { "%.0f bpm".format(it) } ?: "—")
+                today[MetricKeys.ZONE_REST]?.method?.takeIf { it.isNotEmpty() }?.let { Row2("", restSource(it), BloopColors.Muted) }
+                if (custom != null && (maxBpm != null || restBpm != null)) Text("Your custom zones are on, so these don't change the zones or strain.",
+                    color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
+                if (maxBpm == null || restBpm == null) Text("Not known yet: enter them on the Device screen → Profile, or set your age and sync a night.",
+                    color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
                 MetricRow("Average heart rate", today[MetricKeys.HR_AVG]) { "%.0f bpm".format(it) }
                 MetricRow("TRIMP (Edwards)", today[MetricKeys.TRIMP]) { "%.0f".format(it) }
                 Text("Minutes only count once the band's data is on the phone: sync after a workout (or record it with Go live). " +
@@ -220,7 +225,12 @@ fun StrainScreen() {
     }
 }
 
-private fun fmtMinutes(m: Double): String {
+private fun restSource(method: String) = when (method) {
+    "median-7-nights" -> "median of your last 7 nights"
+    else -> method
+}
+
+internal fun fmtMinutes(m: Double): String {
     val t = m.toLong()
     return if (t < 60) "$t min" else "%dh %02dm".format(t / 60, t % 60)
 }
@@ -369,7 +379,7 @@ private fun CalibratingNote(nights: Int) = Text(
 )
 
 @Composable
-private fun ZoneBar(label: String, range: String, minutes: Double?, top: Double, color: Color) = Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+internal fun ZoneBar(label: String, range: String, minutes: Double?, top: Double, color: Color) = Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     Column(Modifier.width(96.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text(range, color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)

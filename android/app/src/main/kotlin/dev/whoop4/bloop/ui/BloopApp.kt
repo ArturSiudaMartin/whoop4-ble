@@ -25,6 +25,7 @@ import dev.whoop4.bloop.ui.screens.DeviceScreen
 import dev.whoop4.bloop.ui.screens.HomeScreen
 import dev.whoop4.bloop.ui.screens.LiveScreen
 import dev.whoop4.bloop.ui.screens.RecoveryScreen
+import dev.whoop4.bloop.ui.screens.SessionScreen
 import dev.whoop4.bloop.ui.screens.SleepScreen
 import dev.whoop4.bloop.ui.screens.StrainScreen
 import dev.whoop4.bloop.ui.theme.BloopColors
@@ -38,6 +39,7 @@ enum class Dest(val route: String, val label: String, val icon: ImageVector) {
 }
 
 private const val DEVICE_ROUTE = "device"
+private const val SESSION_ROUTE = "session/{id}"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,9 +54,12 @@ fun BloopApp() {
             TopAppBar(
                 title = {
                     Text(
-                        if (route == DEVICE_ROUTE) "Device" else Dest.entries.firstOrNull { it.route == route }?.label ?: "Bloop",
+                        if (route == DEVICE_ROUTE) "Device" else if (route == SESSION_ROUTE) "Session" else Dest.entries.firstOrNull { it.route == route }?.label ?: "Bloop",
                         style = MaterialTheme.typography.headlineMedium,
                     )
+                },
+                navigationIcon = {
+                    if (route == SESSION_ROUTE) IconButton(onClick = { nav.popBackStack() }) { Icon(BloopIcons.Back, contentDescription = "Back") }
                 },
                 actions = {
                     // The sliders icon toggles the Device screen.
@@ -69,11 +74,13 @@ fun BloopApp() {
             NavigationBar(containerColor = BloopColors.Surface) {
                 Dest.entries.forEach { d ->
                     NavigationBarItem(
-                        selected = route == d.route || (route == DEVICE_ROUTE && nav.previousBackStackEntry?.destination?.route == d.route),
+                        selected = route == d.route || (route == SESSION_ROUTE && d == Dest.Live) ||
+                            (route == DEVICE_ROUTE && nav.previousBackStackEntry?.destination?.route == d.route),
                         onClick = {
                             // Close the Device screen first: otherwise it is saved as part of the tab's state and
                             // restoreState brings it straight back (the screen "wouldn't close").
                             if (route == DEVICE_ROUTE) nav.popBackStack(DEVICE_ROUTE, inclusive = true)
+                            if (nav.currentBackStackEntry?.destination?.route == SESSION_ROUTE) nav.popBackStack(SESSION_ROUTE, inclusive = true)
                             nav.navigate(d.route) {
                                 popUpTo(nav.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
@@ -99,7 +106,11 @@ fun BloopApp() {
             composable(Dest.Recovery.route) { RecoveryScreen() }
             composable(Dest.Sleep.route) { SleepScreen() }
             composable(Dest.Strain.route) { StrainScreen() }
-            composable(Dest.Live.route) { LiveScreen() }
+            composable(Dest.Live.route) { LiveScreen(onOpenSession = { id -> nav.navigate("session/$id") { launchSingleTop = true } }) }
+            composable(SESSION_ROUTE) { e ->
+                val id = e.arguments?.getString("id")?.toLongOrNull() ?: return@composable
+                SessionScreen(id, onClosed = { nav.popBackStack() })
+            }
             composable(DEVICE_ROUTE) { DeviceScreen() }
         }
     }

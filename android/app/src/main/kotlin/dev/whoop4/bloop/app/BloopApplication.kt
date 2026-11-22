@@ -157,12 +157,20 @@ class Settings(c: Context) {
     var age: Int?
         get() = p.getInt("age", -1).takeIf { it > 0 }
         set(v) = p.edit().putInt("age", v ?: -1).apply()
-    /** Sleep need for sleep performance; 8 h unless the user changes it. */
+    /** Maximum heart rate entered by the user (bpm); overrides the age formula and the estimate. */
+    var maxHr: Int?
+        get() = p.getInt("maxHr", -1).takeIf { it > 0 }
+        set(v) = p.edit().putInt("maxHr", v ?: -1).apply()
+    /** Resting heart rate entered by the user (bpm); overrides the value measured at night. */
+    var restingHr: Int?
+        get() = p.getInt("restingHr", -1).takeIf { it > 0 }
+        set(v) = p.edit().putInt("restingHr", v ?: -1).apply()
     /** Custom zone lower bounds in bpm for zones 1..5 (ascending), or null for % of max HR. */
     var zoneBounds: List<Int>?
         get() = p.getString("zoneBounds", null)?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 5 && it.zipWithNext().all { (a, b) -> a < b } }
         set(v) = p.edit().putString("zoneBounds", v?.joinToString(",")).apply()
 
+    /** Sleep need for sleep performance; 8 h unless the user changes it. */
     var sleepNeedHours: Double
         get() = p.getFloat("sleepNeedHours", 8f).toDouble()
         set(v) = p.edit().putFloat("sleepNeedHours", v.toFloat()).apply()
@@ -173,6 +181,10 @@ class Settings(c: Context) {
     var alarmMinutes: Int?
         get() = p.getInt("alarmMinutes", -1).takeIf { it >= 0 }
         set(v) = p.edit().putInt("alarmMinutes", v ?: -1).apply()
+    /** The running activity session started Live, so ending the session stops Live too. */
+    var sessionStartedLive: Boolean
+        get() = p.getBoolean("sessionStartedLive", false)
+        set(v) = p.edit().putBoolean("sessionStartedLive", v).apply()
     var analyticsBackfilled: Boolean
         get() = p.getBoolean("analyticsBackfilled", false)
         set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()

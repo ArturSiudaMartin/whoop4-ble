@@ -158,7 +158,8 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
             if (dayHr.size >= 600) put(MetricKeys.HR_P999, sorted[((sorted.size - 1) * 0.999).toInt()], MetricKind.DERIVED, "p99.9", null)
         }
         val restingForStrain = restingBaseline(nights, night.restingHr.valueOrNull?.bpm)
-        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxHr(history, dayHr), settings.zoneBounds)
+        val maxForStrain = maxHr(history, dayHr)
+        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxForStrain, settings.zoneBounds)
         if (strain is Metric.Estimated) {
             put(MetricKeys.STRAIN, strain.value.score, MetricKind.ESTIMATED, strain.method, strain.confidence)
             put(MetricKeys.TRIMP, strain.value.trimp, MetricKind.ESTIMATED, strain.method, strain.confidence)
@@ -166,9 +167,11 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
             put(MetricKeys.STRAIN_DATA_MIN, strain.value.minutesWithData, MetricKind.DERIVED, "coverage", null)
             put(MetricKeys.STRAIN_LAST_MS, strain.value.lastSampleMs.toDouble(), MetricKind.MEASURED, "band", null)
             put(MetricKeys.STRAIN_LIVE_MIN, liveFill.size / 60.0, MetricKind.DERIVED, "live-gap-fill", null)
-            if (settings.zoneBounds == null) put(MetricKeys.ZONE_REST, strain.value.restBpm, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null)
-            if (settings.zoneBounds == null) put(MetricKeys.ZONE_MAX, strain.value.maxBpm, MetricKind.DERIVED, maxHr(history, storedDayHr)?.source ?: "", null)
         }
+        // Stored whenever known (also with custom zones, or when strain itself can't be computed yet), so the Strain
+        // screen always shows the values in use and where they came from.
+        restingForStrain.valueOrNull?.let { put(MetricKeys.ZONE_REST, it, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null) }
+        maxForStrain?.let { put(MetricKeys.ZONE_MAX, it.bpm, MetricKind.DERIVED, it.source, null) }
         log.i("analytics $day strain: ${storedDayHr.size} stored + ${liveFill.size} live samples, " + when (strain) {
             is Metric.Estimated -> "%.1f, zones %s min, data %.0f min".format(strain.value.score,
                 (1..5).joinToString("/") { "%.0f".format(strain.value.zoneMinutes[it]) }, strain.value.minutesWithData)
@@ -219,16 +222,25 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         return out
     }
 
+    /** Heart rate for a time range (e.g. an activity session): band-stored samples, with live readings filling their gaps. */
+    suspend fun heartRate(device: String, from: Long, to: Long): List<HrPoint> {
+        val stored = db.samples().samplesBetween(device, SampleSource.HISTORICAL, from, to).filter { it.hr > 0 }.map { HrPoint(it.tsUtcMs, it.hr) }
+        val fill = liveGapFill(device, stored, from, to)
+        return if (fill.isEmpty()) stored else (stored + fill).sortedBy { it.tsMs }
+    }
+
     private fun Metric<Double>.methodOrEmpty() = when (this) { is Metric.Derived -> method; is Metric.Estimated -> method; else -> "" }
 
     /** Resting HR for zones: median of the last 7 nights' values (including tonight's), so one odd night doesn't move the zones. */
     private fun restingBaseline(nights: List<NightValues>, tonight: Double?): Metric<Double> {
+        settings.restingHr?.let { return Metric.Derived(it.toDouble(), "set in Profile", 1.0) }
         val recent = (nights.sortedByDescending { it.dayIndex }.mapNotNull { it.restingHr }.take(6) + listOfNotNull(tonight)).sorted()
         if (recent.isEmpty()) return Metric.Missing("no resting heart rate yet")
         return Metric.Derived(recent[recent.size / 2], "median-7-nights", minOf(1.0, recent.size / 3.0))
     }
 
     private fun maxHr(history: List<MetricValueEntity>, dayHr: List<HrPoint>): HrMax? {
+        settings.maxHr?.let { return HrMax(it.toDouble(), "set in Profile", 1.0) }
         settings.age?.let { return HeartRateMax.tanaka(it) }
         // No age: the highest daily 99.9th percentile over the stored days (needs 3 days). It underestimates a true
         // maximum (so strain reads high), hence the lower confidence; setting an age is better.

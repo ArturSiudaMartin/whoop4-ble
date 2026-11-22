@@ -145,7 +145,7 @@ private fun act(ctx: Context, block: (BloopApplication) -> Unit) {
 // ------------------------------------------------------------------ Live
 
 @Composable
-fun LiveScreen() {
+fun LiveScreen(onOpenSession: (Long) -> Unit = {}) {
     val ctx = LocalContext.current
     val app = remember { BloopApplication.from(ctx) }
     val s by app.band.status.collectAsStateWithLifecycle()
@@ -180,6 +180,7 @@ fun LiveScreen() {
         }
         Text("Live keeps a connection open and streams heart rate and RR intervals until you stop it, even with the screen off. " +
             "Live readings are saved. Between live sessions Bloop only connects to sync.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+        SessionsSection(granted, onOpenSession)
     }
 }
 
@@ -364,6 +365,10 @@ private fun shareLog(ctx: Context, app: BloopApplication) {
 @Composable
 private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()) {
     var ageText by remember { mutableStateOf(app.settings.age?.toString().orEmpty()) }
+    var maxText by remember { mutableStateOf(app.settings.maxHr?.toString().orEmpty()) }
+    var restText by remember { mutableStateOf(app.settings.restingHr?.toString().orEmpty()) }
+    val maxOk = maxText.isEmpty() || maxText.toIntOrNull() in 120..230
+    val restOk = restText.isEmpty() || restText.toIntOrNull() in 30..100
     var need by remember { mutableStateOf(app.settings.sleepNeedHours) }
     var customZones by remember { mutableStateOf(app.settings.zoneBounds != null) }
     val zoneText = remember { (app.settings.zoneBounds ?: DEFAULT_ZONES).map { mutableStateOf(it.toString()) } }
@@ -379,6 +384,30 @@ private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.OutlinedTextField(
+                value = maxText,
+                onValueChange = { v -> maxText = v.filter { it.isDigit() }.take(3) },
+                label = { Text("Max HR (bpm)") },
+                placeholder = { Text("auto") },
+                isError = !maxOk,
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.OutlinedTextField(
+                value = restText,
+                onValueChange = { v -> restText = v.filter { it.isDigit() }.take(3) },
+                label = { Text("Resting HR (bpm)") },
+                placeholder = { Text("auto") },
+                isError = !restOk,
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (!maxOk || !restOk) Text("Max HR must be 120–230 bpm and resting HR 30–100 bpm, or leave them empty.",
+            color = BloopColors.Strain, style = MaterialTheme.typography.labelSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Sleep need", modifier = Modifier.weight(1f))
             TextButton({ need = (need - 0.25).coerceAtLeast(5.0) }) { Text("−") }
@@ -407,9 +436,12 @@ private fun ProfileCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()
                 else "Each zone must start higher than the one before (40–240 bpm).",
                 color = if (zonesValid) BloopColors.Muted else BloopColors.Strain, style = MaterialTheme.typography.labelSmall)
         }
-        Text("Only used on this phone. Without an age, maximum heart rate is estimated from the highest heart rate seen, which makes strain read high.",
+        Text("Only used on this phone. Leave max and resting HR empty to have Bloop work them out: max HR from your age " +
+            "(or, without an age, from the highest heart rate seen, which makes strain read high) and resting HR from your nights.",
             color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
-        PrimaryButton("Save and recompute metrics", enabled = !customZones || zonesValid) {
+        PrimaryButton("Save and recompute metrics", enabled = (!customZones || zonesValid) && maxOk && restOk) {
+            app.settings.maxHr = maxText.toIntOrNull()
+            app.settings.restingHr = restText.toIntOrNull()
             app.settings.zoneBounds = if (customZones && zonesValid) bounds.filterNotNull() else null
             app.settings.age = ageText.toIntOrNull()?.takeIf { it in 10..100 }
             app.settings.sleepNeedHours = need

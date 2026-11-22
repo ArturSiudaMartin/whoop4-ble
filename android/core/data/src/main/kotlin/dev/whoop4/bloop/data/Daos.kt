@@ -137,6 +137,19 @@ interface ActivityDao {
 
     @Query("SELECT * FROM activity_session ORDER BY startUtcMs DESC")
     fun observeAll(): Flow<List<ActivitySessionEntity>>
+
+    @Query("SELECT * FROM activity_session WHERE id = :id")
+    fun observe(id: Long): Flow<ActivitySessionEntity?>
+
+    @Query("SELECT * FROM activity_session WHERE id = :id")
+    suspend fun get(id: Long): ActivitySessionEntity?
+
+    /** The session being recorded now (no end time yet), if any. */
+    @Query("SELECT * FROM activity_session WHERE endUtcMs IS NULL ORDER BY startUtcMs DESC LIMIT 1")
+    fun observeRunning(): Flow<ActivitySessionEntity?>
+
+    @Query("DELETE FROM activity_session WHERE id = :id")
+    suspend fun delete(id: Long)
 }
 
 @Dao
