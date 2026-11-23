@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -158,18 +159,51 @@ internal fun SessionsSection(granted: Boolean, onOpen: (Long) -> Unit) {
         }
     }
 
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    var shown by remember { mutableStateOf(today) }
+    if (shown > today) shown = today
     val done = all.filter { it.endUtcMs != null }
-    if (done.isNotEmpty()) CardBox(Modifier.fillMaxWidth()) {
+    val ofDay = done.filter { Instant.ofEpochMilli(it.startUtcMs).atZone(zone).toLocalDate() == shown }
+    val oldest = done.minOfOrNull { Instant.ofEpochMilli(it.startUtcMs).atZone(zone).toLocalDate() }
+    if (done.isNotEmpty()) CardBox(Modifier.fillMaxWidth().pointerInput(Unit) {
+        // Swipe right for the day before, left for the day after (never past today).
+        var drag = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { drag = 0f },
+            onDragEnd = {
+                val step = 60.dp.toPx()
+                if (drag > step) shown = shown.minusDays(1)
+                else if (drag < -step && shown < LocalDate.now(zone)) shown = shown.plusDays(1)
+            },
+        ) { change, dx -> change.consume(); drag += dx }
+    }) {
         Column {
-            Text("Activities", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
-            done.take(50).forEach { a ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Activities", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton({ shown = shown.minusDays(1) }) { Text("‹") }
+                Text(dayLabel(shown), modifier = Modifier.clickable(enabled = shown != today) { shown = today })
+                TextButton({ shown = shown.plusDays(1) }, enabled = shown < today) { Text("›") }
+            }
+            if (ofDay.isEmpty()) {
+                Text(
+                    if (oldest != null && shown < oldest) "No activities before ${dayLabel(oldest)}." else "No activities on this day.",
+                    color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 10.dp),
+                )
+                if (shown != today) TextButton({ shown = today }) { Text("Back to today") }
+            } else {
+                val total = ofDay.sumOf { (it.endUtcMs ?: it.startUtcMs) - it.startUtcMs }
+                Text("${ofDay.size} ${if (ofDay.size == 1) "activity" else "activities"} · ${elapsed(total)}",
+                    color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
+            }
+            ofDay.forEach { a ->
                 val endMs = a.endUtcMs ?: return@forEach
                 Row(Modifier.fillMaxWidth().clickable { onOpen(a.id) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(Activities.of(a.type).emoji, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(a.title(), style = MaterialTheme.typography.bodyLarge)
-                        Text(day(a.startUtcMs) + " · " + clock(a.startUtcMs) + "–" + clock(endMs),
+                        Text(clock(a.startUtcMs) + "–" + clock(endMs),
                             color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
                     }
                     Text(elapsed(endMs - a.startUtcMs), color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
@@ -196,6 +230,7 @@ internal fun SessionsSection(granted: Boolean, onOpen: (Long) -> Unit) {
     }
     if (addingPast) PastSessionDialog(recent, onDismiss = { addingPast = false }) { type, name, from, to ->
         addingPast = false
+        shown = Instant.ofEpochMilli(from).atZone(zone).toLocalDate()
         app.scope.launch {
             val id = app.db.activities().insert(ActivitySessionEntity(
                 deviceAddress = s.address, type = type.key, origin = "MANUAL", startUtcMs = from, endUtcMs = to,
@@ -256,7 +291,7 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(a.title(), style = MaterialTheme.typography.headlineMedium)
-                Text((if (a.name != null) type.label + " · " else "") + day(a.startUtcMs) + " · " + clock(a.startUtcMs) + "–" +
+                Text((if (a.name != null) type.label + " · " else "") + dayLabel(Instant.ofEpochMilli(a.startUtcMs).atZone(ZoneId.systemDefault()).toLocalDate()) + " · " + clock(a.startUtcMs) + "–" +
                     (a.endUtcMs?.let(::clock) ?: "now") + " · " + elapsed(end - a.startUtcMs),
                     color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
             }
@@ -639,14 +674,12 @@ internal fun StravaCard(app: BloopApplication) = CardBox(Modifier.fillMaxWidth()
 private fun clock(ms: Long): String =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalTime().format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
 
-private fun day(ms: Long): String {
-    val d = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
-    return when (d) {
+private fun dayLabel(d: LocalDate): String =
+    when (d) {
         LocalDate.now() -> "Today"
         LocalDate.now().minusDays(1) -> "Yesterday"
         else -> d.format(DateTimeFormatter.ofPattern("EEE d MMM"))
     }
-}
 
 private fun elapsed(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
