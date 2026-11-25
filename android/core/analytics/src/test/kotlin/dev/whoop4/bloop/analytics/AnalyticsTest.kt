@@ -205,39 +205,55 @@ class StrainTest {
         assertEquals(5, Zones.ofMax(175, 190.0))   // 92 %
     }
 
-    @Test fun displayMinutesVsTrimpZones() {
-        // 140 bpm with rest 60 / max 190: zone 3 of max HR (74 %), zone 2 of HRR (61.5 %)
+    private fun w(hr: Int) = Strain.weight((hr - 60.0) / 130.0)
+
+    @Test fun displayMinutesAndBanisterTrimp() {
+        // 140 bpm with rest 60 / max 190: zone 3 of max HR (74 %), HRR 61.5 %
         val pts = (0 until 600).map { HrPoint(it * 1000L, 140) }
         val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated
         assertEquals(10.0, s.value.zoneMinutes[3], 0.05)
-        assertEquals(2 * 10.0, s.value.trimp, 0.1)
+        assertEquals(10 * w(140), s.value.trimp, 0.01)
         assertEquals(10.0, s.value.minutesWithData, 0.05)
     }
 
-    @Test fun customZones() {
+    @Test fun restingSecondsAddNothing() {
+        val pts = (0 until 3600).map { HrPoint(it * 1000L, 90) }   // HRR 23 %, below the floor
+        val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated
+        assertEquals(0.0, s.value.trimp, 1e-9)
+    }
+
+    @Test fun customZonesOnlyChangeDisplay() {
         val b = listOf(125, 140, 155, 170, 185)
         assertEquals(0, Zones.ofBounds(124, b))
         assertEquals(2, Zones.ofBounds(140, b))
         assertEquals(2, Zones.ofBounds(154, b))
         assertEquals(3, Zones.ofBounds(155, b))
         assertEquals(5, Zones.ofBounds(200, b))
-        val pts = (0 until 600).map { HrPoint(it * 1000L, 145) }
-        val s = Strain.of(pts, 0, HOUR, Metric.Missing("no rest"), null, b) as Metric.Estimated
-        assertEquals(10.0, s.value.zoneMinutes[2], 0.05)
-        assertEquals(20.0, s.value.trimp, 0.1)
+        // under zone 1 still counts towards strain
+        val pts = (0 until 600).map { HrPoint(it * 1000L, 110) }
+        val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max, b) as Metric.Estimated
+        assertEquals(10.0, s.value.zoneMinutes[0], 0.05)
+        assertEquals(10 * w(110), s.value.trimp, 0.01)
+        // no rest/max: custom zones imply a max, rest defaults
+        assertTrue(Strain.of(pts, 0, HOUR, Metric.Missing("no rest"), null, b) is Metric.Estimated)
     }
 
-    @Test fun oneHourZoneThree() {
-        val pts = (0 until 3600).map { HrPoint(it * 1000L, 160) }
+    @Test fun scaleAnchors() {
+        assertEquals(6.0, Strain.scale(30.0), 0.2)
+        assertEquals(13.5, Strain.scale(120.0), 0.3)
+        assertTrue(Strain.scale(500.0) in 18.0..20.0)
+    }
+
+    @Test fun easyHourRunReadsLikeWhoop() {
+        val pts = (0 until 3600).map { HrPoint(it * 1000L, 145) }   // HRR 65 %
         val s = Strain.of(pts, 0, HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated
-        assertEquals(180.0, s.value.trimp, 0.1)
-        assertEquals(21 * (1 - kotlin.math.exp(-180.0 / 250)), s.value.score, 1e-6)
+        assertTrue("score ${s.value.score}", s.value.score in 11.0..13.5)
     }
 
     @Test fun gapsAddNothing() {
         val pts = listOf(HrPoint(0, 160), HrPoint(HOUR, 160))
         val s = Strain.of(pts, 0, 2 * HOUR, Metric.Derived(60.0, "t", 1.0), max) as Metric.Estimated
-        assertEquals("5 s + 1 s in zone 3", 0.3, s.value.trimp, 1e-9)
+        assertEquals("5 s + 1 s", 6 / 60.0 * w(160), s.value.trimp, 1e-9)
     }
 
     @Test fun scaleIsBounded() {

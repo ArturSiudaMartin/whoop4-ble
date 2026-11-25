@@ -123,7 +123,7 @@ Tested remotely: the user installs a build, tries it, and shares the **debug log
 | Resting HR | lowest 5-min mean HR in the sleep period (80 % coverage); 5th percentile kept as a check | derived |
 | Sleep | van Hees arm-angle: HDCZA sleep period (2018) + 5°/5-min sustained inactivity (2015), 18:00–14:00 window; no stages | estimate |
 | Sleep performance | asleep ÷ sleep need (Profile, default 8 h) | estimate |
-| Strain | Edwards TRIMP on Karvonen zones, shown as 21 × (1 − e^(−TRIMP/250)) (Bloop's own scale); HRmax from age (Tanaka) or the highest observed | estimate |
+| Strain | Banister TRIMP on heart-rate reserve (HRR ≥ 30 %), shown as 21 · T^1.1 / (T^1.1 + 70^1.1), tuned to read like WHOOP day strain; HRmax from Profile, age (Tanaka) or the highest observed | estimate |
 | Recovery | 0.5·z(ln RMSSD) − 0.3·z(RHR) + 0.2·z(sleep) vs the previous 28 days, normal CDF → 1–99 %; hidden until 4 nights | estimate |
 
 Metrics are recomputed after every sync (from the run's earliest record) and on app start; only band-stored

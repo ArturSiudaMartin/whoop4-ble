@@ -58,6 +58,10 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import dev.whoop4.bloop.analytics.HeartRateMax
+import dev.whoop4.bloop.analytics.HrMax
+import dev.whoop4.bloop.analytics.Metric
+import dev.whoop4.bloop.analytics.Strain
+import dev.whoop4.bloop.analytics.valueOrNull
 import dev.whoop4.bloop.analytics.HrPoint
 import dev.whoop4.bloop.analytics.Zones
 import dev.whoop4.bloop.app.Activities
@@ -251,6 +255,8 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
     val address = app.band.status.collectAsState().value.address
     val maxFlow = remember(address) { address?.let { app.db.metrics().observe(it, MetricKeys.ZONE_MAX, 1) } ?: flowOf(emptyList()) }
     val storedMax by maxFlow.collectAsState(initial = emptyList())
+    val restFlow = remember(address) { address?.let { app.db.metrics().observe(it, MetricKeys.ZONE_REST, 1) } ?: flowOf(emptyList()) }
+    val storedRest by restFlow.collectAsState(initial = emptyList())
     val latestSample by remember(address) {
         address?.let { app.db.samples().observeLatest(it, SampleSource.HISTORICAL) } ?: flowOf(null)
     }.collectAsState(initial = null)
@@ -284,6 +290,12 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
     }
     val stats = remember(hr, custom, maxHr) { sessionStats(hr, zoneOf) }
     val end = a.endUtcMs ?: System.currentTimeMillis()
+    val restHr = app.settings.restingHr?.toDouble() ?: storedRest.firstOrNull()?.value
+    val activityStrain = remember(hr, maxHr, restHr, custom) {
+        Strain.of(hr, a.startUtcMs, end + 1,
+            restHr?.let { Metric.Derived(it, "stored", 1.0) } ?: Metric.Missing("no resting HR"),
+            maxHr?.let { HrMax(it, "stored", 1.0) }, custom).valueOrNull?.score
+    }
 
     Page {
         Row(Modifier.fillMaxWidth().clickable { changingType = true }, verticalAlignment = Alignment.CenterVertically) {
@@ -301,6 +313,7 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
             StatTile("Average", stats?.let { "%.0f".format(it.avg) }, Modifier.weight(1f))
             StatTile("Max", stats?.max?.toString(), Modifier.weight(1f))
             StatTile("Min", stats?.min?.toString(), Modifier.weight(1f))
+            StatTile("Strain", activityStrain?.let { "%.1f".format(it) }, Modifier.weight(1f), unit = "")
         }
         CardBox(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -404,19 +417,21 @@ private fun shareTcx(ctx: Context, a: ActivitySessionEntity, hr: List<HrPoint>) 
 }
 
 @Composable
-private fun StatTile(label: String, value: String?, modifier: Modifier) = CardBox(modifier) {
+internal fun StatTile(label: String, value: String?, modifier: Modifier, unit: String = " BPM") = CardBox(modifier) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Text(value ?: "—", style = MaterialTheme.typography.headlineMedium, color = if (value == null) BloopColors.Muted else BloopColors.OnSurface)
-        Text(label.uppercase() + " BPM", style = MaterialTheme.typography.labelSmall, color = BloopColors.Muted)
+        Text(label.uppercase() + unit, style = MaterialTheme.typography.labelSmall, color = BloopColors.Muted)
     }
 }
 
 /**
  * Heart rate over the session, averaged into time buckets; gaps over a minute break the line. Touch and hold (or tap)
  * shows the nearest sample's time and bpm. With [selectedZone], the parts in that zone are coloured and shaded.
+ * [shade] ranges (e.g. awake periods of a night) are drawn as light bands behind the line.
  */
 @Composable
-private fun HrChart(hr: List<HrPoint>, from: Long, to: Long, avg: Double, zoneOf: ((Int) -> Int)?, selectedZone: Int?) {
+internal fun HrChart(hr: List<HrPoint>, from: Long, to: Long, avg: Double, zoneOf: ((Int) -> Int)?, selectedZone: Int?,
+                     shade: List<Pair<Long, Long>> = emptyList(), shadeColor: Color = BloopColors.Caution) {
     val tm = rememberTextMeasurer()
     val label = MaterialTheme.typography.labelSmall.copy(color = BloopColors.Muted)
     val tipStyle = MaterialTheme.typography.labelSmall.copy(color = BloopColors.OnSurface)
@@ -470,6 +485,10 @@ private fun HrChart(hr: List<HrPoint>, from: Long, to: Long, avg: Double, zoneOf
             drawText(m, topLeft = Offset((x(t) - m.size.width * anchor).coerceIn(left, size.width - m.size.width), size.height - m.size.height))
         }
 
+        for ((a, b) in shade) {
+            val xa = x(a.coerceIn(from, to)); val xb = x(b.coerceIn(from, to))
+            if (xb > xa) drawRect(shadeColor.copy(alpha = 0.16f), Offset(xa, top), Size(xb - xa, h))
+        }
         val zoneColor = selectedZone?.let { ZONE_COLORS[it - 1] }
         // shade the time spent in the selected zone
         if (zoneColor != null) buckets.forEachIndexed { i, v ->

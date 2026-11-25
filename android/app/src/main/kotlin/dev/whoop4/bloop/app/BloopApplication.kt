@@ -224,6 +224,7 @@ class Settings(c: Context) {
         get() = p.getLong("updateLastCheck", 0)
         set(v) = p.edit().putLong("updateLastCheck", v).apply()
     var analyticsBackfilled: Boolean
-        get() = p.getBoolean("analyticsBackfilled", false)
-        set(v) = p.edit().putBoolean("analyticsBackfilled", v).apply()
+        // Tied to the strain method, so a new model recomputes all stored days once.
+        get() = p.getString("analyticsBackfilledFor", null) == dev.whoop4.bloop.analytics.Strain.METHOD
+        set(v) = p.edit().putString("analyticsBackfilledFor", if (v) dev.whoop4.bloop.analytics.Strain.METHOD else null).apply()
 }

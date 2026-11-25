@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.whoop4.bloop.analytics.Recovery as RecoveryModel
+import dev.whoop4.bloop.analytics.HrPoint
 import dev.whoop4.bloop.app.BloopApplication
 import dev.whoop4.bloop.app.MetricKeys
 import dev.whoop4.bloop.data.MetricKind
@@ -146,6 +147,7 @@ fun SleepScreen() {
     Page {
         BigRing("Sleep performance", BloopColors.Sleep, today[MetricKeys.SLEEP_PERFORMANCE]?.value, today[MetricKeys.SLEEP_PERFORMANCE]?.let { "%.0f%%".format(it.value * 100) })
         LastNightData(today[MetricKeys.SLEEP_END]?.value?.toLong())
+        SleepHeartRateCard(today[MetricKeys.SLEEP_START]?.value?.toLong(), today[MetricKeys.SLEEP_END]?.value?.toLong())
         CardBox(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 MetricRow("Asleep", today[MetricKeys.SLEEP_ASLEEP_MS]) { fmtDuration(it) }
@@ -212,18 +214,19 @@ fun StrainScreen() {
                 if (maxBpm == null || restBpm == null) Text("Not known yet: enter them on the Device screen → Profile, or set your age and sync a night.",
                     color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
                 MetricRow("Average heart rate", today[MetricKeys.HR_AVG]) { "%.0f bpm".format(it) }
-                MetricRow("TRIMP (Edwards)", today[MetricKeys.TRIMP]) { "%.0f".format(it) }
+                MetricRow("TRIMP (Banister)", today[MetricKeys.TRIMP]) { "%.0f".format(it) }
                 Text("Minutes only count once the band's data is on the phone: sync after a workout (or record it with Go live). " +
-                    "If the zones look too low, set your age on the Device screen so the max heart rate isn't guessed.",
+                    "If strain looks off, check the max and resting heart rate used above.",
                     color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 SecondaryButton("Recalculate today", Modifier.fillMaxWidth()) { app.recomputeToday() }
             }
         }
         History("Last 14 days", days.take(14), MetricKeys.STRAIN, BloopColors.Caution, 21.0) { "%.1f".format(it) }
-        InfoCard("How strain works", if (app.settings.zoneBounds != null) "Zones are your custom bpm ranges (Device screen → Profile). " +
-            "The strain score is Edwards TRIMP: minutes in each zone × the zone number, on Bloop's own 0–21 scale: 21 × (1 − e^(−TRIMP/250))." else "Zones are % of your maximum heart rate: zone 1 is 50–60 %, zone 2 60–70 %, zone 3 70–80 %, " +
-            "zone 4 80–90 % and zone 5 above 90 %. The strain score is Edwards TRIMP (minutes in each heart-rate-reserve zone × the zone " +
-            "number, which uses your resting HR too, so everyday walking adds little), on Bloop's own 0–21 scale: 21 × (1 − e^(−TRIMP/250)).")
+        InfoCard("How strain works", "Every second of the day is weighted by how hard your heart works: heart-rate reserve, " +
+            "(HR − resting) / (max − resting), with Banister's TRIMP weighting, so a minute near max counts about 7× a brisk walk and " +
+            "sitting adds nothing. The total is mapped to 0–21 on a curve tuned to read like WHOOP's day strain: an ordinary day ≈ 6, " +
+            "plus an easy hour's run ≈ 13, a long hard day 18+. " + (if (app.settings.zoneBounds != null) "Your custom zones change the time in zones shown above, not the score. " else "") +
+            "An accurate max heart rate matters most: set it on the Device screen → Profile if you know it.")
     }
 }
 
@@ -286,6 +289,46 @@ private fun LastNightData(sleepEndMs: Long?) {
                 color = BloopColors.Caution, style = MaterialTheme.typography.bodyMedium,
             )
             reason?.let { Text("No sleep found: $it.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
+/** Heart rate over last night's sleep (band data, live readings filling gaps), with awake periods shaded. */
+@Composable
+private fun SleepHeartRateCard(startMs: Long?, endMs: Long?) {
+    val app = BloopApplication.from(LocalContext.current)
+    val address = app.band.status.collectAsState().value.address ?: return
+    if (startMs == null || endMs == null || endMs <= startMs) return
+    val sessionsFlow = remember(address) { app.db.sleep().observeRecent(address, 3) }
+    val sessions by sessionsFlow.collectAsState(initial = emptyList())
+    val session = sessions.firstOrNull { it.startUtcMs == startMs } ?: sessions.firstOrNull { it.endUtcMs > startMs && it.startUtcMs < endMs }
+    val data by produceState<Pair<List<HrPoint>, List<Pair<Long, Long>>>?>(null, address, startMs, endMs, session?.id) {
+        val hr = app.analytics.heartRate(address, startMs, endMs)
+        val wake = session?.let { s -> app.db.sleep().stages(s.id).filter { it.stage == "WAKE" }.map { it.startUtcMs to it.endUtcMs } }.orEmpty()
+        value = hr to wake
+    }
+    CardBox(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Heart rate during sleep", style = MaterialTheme.typography.titleMedium)
+            val d = data
+            when {
+                d == null -> Text("Loading…", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                d.first.isEmpty() -> Text("No heart rate for last night's sleep on the phone yet.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                else -> {
+                    val (hr, wake) = d
+                    // lowest / highest of 1-minute averages, so a single noisy reading doesn't set them
+                    val perMinute = remember(hr) { hr.groupBy { it.tsMs / 60_000 }.values.map { m -> m.sumOf { it.hr }.toDouble() / m.size } }
+                    val avg = hr.sumOf { it.hr }.toDouble() / hr.size
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        StatTile("Average", "%.0f".format(avg), Modifier.weight(1f))
+                        StatTile("Lowest", "%.0f".format(perMinute.min()), Modifier.weight(1f))
+                        StatTile("Highest", "%.0f".format(perMinute.max()), Modifier.weight(1f))
+                    }
+                    HrChart(hr, startMs, endMs, avg, null, null, shade = wake)
+                    Text("Shaded: awake. Dashed line: average. Gaps: no data. Touch and hold (or tap) the chart to read the time and heart rate.",
+                        color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }
