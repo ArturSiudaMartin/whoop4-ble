@@ -192,6 +192,10 @@ interface MetricDao {
     @Query("DELETE FROM metric_value WHERE deviceAddress = :device AND periodStartUtcMs = :periodStartUtcMs AND key NOT IN (:keep)")
     suspend fun deleteOthers(device: String, periodStartUtcMs: Long, keep: List<String>): Int
 
+    /** Removes every value of a day before it is recomputed, including rows a different method version left behind. */
+    @Query("DELETE FROM metric_value WHERE deviceAddress = :device AND periodStartUtcMs = :periodStartUtcMs")
+    suspend fun deleteDay(device: String, periodStartUtcMs: Long): Int
+
     @Query("SELECT * FROM daily_summary WHERE deviceAddress = :device ORDER BY localDate DESC LIMIT :limit")
     fun observeDaily(device: String, limit: Int): Flow<List<DailySummaryEntity>>
 }

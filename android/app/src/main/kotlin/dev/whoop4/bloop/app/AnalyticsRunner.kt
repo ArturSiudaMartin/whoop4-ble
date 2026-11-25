@@ -139,6 +139,7 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
 
         // ---- recovery, against the stored previous 28 nights
         val history = db.metrics().between(device, day.minusDays(Recovery.BASELINE_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli(), dayStart)
+            .groupBy { it.periodStartUtcMs to it.key }.map { (_, v) -> v.maxBy { it.computedAtUtcMs } }
         val byDay = history.groupBy { Instant.ofEpochMilli(it.periodStartUtcMs).atZone(zone).toLocalDate().toEpochDay() }
         val nights = byDay.map { (d, vs) ->
             fun v(k: String) = vs.firstOrNull { it.key == k }?.value
@@ -193,7 +194,8 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
                         stage = if (it.state == SleepState.ASLEEP) "ASLEEP" else "WAKE", confidence = sleep.confidence)
                 })
             }
-            db.metrics().deleteOthers(device, dayStart, values.map { it.key }.ifEmpty { listOf("-") })
+            // Whole day replaced: the unique key includes the method, so a new method would otherwise add a second row.
+            db.metrics().deleteDay(device, dayStart)
             if (values.isNotEmpty()) db.metrics().upsert(values)
             db.metrics().upsertDaily(DailySummaryEntity(device, day.toString(), zone.id, dayStart, dayEnd, coverage.coerceIn(0.0, 1.0), now))
         }

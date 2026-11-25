@@ -79,7 +79,7 @@ private fun rememberDays(days: Long = 30): List<Pair<LocalDate, Map<String, Metr
     val flow = remember(address) { address?.let { app.db.metrics().observeSince(it, since) } ?: flowOf(emptyList()) }
     val rows by flow.collectAsState(initial = emptyList())
     return rows.groupBy { Instant.ofEpochMilli(it.periodStartUtcMs).atZone(zone).toLocalDate() }
-        .mapValues { (_, v) -> v.associateBy { it.key } }
+        .mapValues { (_, v) -> v.sortedBy { it.computedAtUtcMs }.associateBy { it.key } }   // newest wins if a stale row is left
         .toList().sortedByDescending { it.first }
 }
 

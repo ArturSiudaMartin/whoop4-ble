@@ -145,6 +145,9 @@ class BloopApplication : Application() {
     }
 }
 
+/** Change to recompute every stored day once on the next start (0.4.6: clears rows 0.4.5 left next to the new strain). */
+private val ANALYTICS_VERSION = dev.whoop4.bloop.analytics.Strain.METHOD + "+day-replace"
+
 class Settings(c: Context) {
     private val p = c.getSharedPreferences("bloop", Context.MODE_PRIVATE)
     var bandAddress: String?
@@ -224,7 +227,7 @@ class Settings(c: Context) {
         get() = p.getLong("updateLastCheck", 0)
         set(v) = p.edit().putLong("updateLastCheck", v).apply()
     var analyticsBackfilled: Boolean
-        // Tied to the strain method, so a new model recomputes all stored days once.
-        get() = p.getString("analyticsBackfilledFor", null) == dev.whoop4.bloop.analytics.Strain.METHOD
-        set(v) = p.edit().putString("analyticsBackfilledFor", if (v) dev.whoop4.bloop.analytics.Strain.METHOD else null).apply()
+        // Tied to the analytics version, so a new model recomputes all stored days once.
+        get() = p.getString("analyticsBackfilledFor", null) == ANALYTICS_VERSION
+        set(v) = p.edit().putString("analyticsBackfilledFor", if (v) ANALYTICS_VERSION else null).apply()
 }
