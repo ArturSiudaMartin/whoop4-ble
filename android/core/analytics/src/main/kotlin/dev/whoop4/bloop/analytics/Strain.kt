@@ -2,6 +2,7 @@ package dev.whoop4.bloop.analytics
 
 import kotlin.math.exp
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 /** Maximum heart rate and where it came from. */
 data class HrMax(val bpm: Double, val source: String, val confidence: Double)
@@ -53,7 +54,7 @@ object Zones {
 data class StrainResult(
     /** Bloop's 0–21 scale, tuned to read like WHOOP's day strain (see [Strain]). */
     val score: Double,
-    /** Banister TRIMP: Σ minutes × HRR × 0.64·e^(1.92·HRR), for HRR ≥ [Strain.HRR_FLOOR]. */
+    /** Total load the score is made from: [cardioTrimp] + [muscularLoad]. */
     val trimp: Double,
     /** Minutes in the display zones 1..5 (index 0 = below zone 1): % of max HR, or the custom bpm zones. */
     val zoneMinutes: List<Double>,
@@ -64,6 +65,12 @@ data class StrainResult(
     val lastSampleMs: Long = 0,
     val restBpm: Double = 0.0,
     val maxBpm: Double = 0.0,
+    /** Banister TRIMP: Σ minutes × HRR × 0.64·e^(1.92·HRR), for HRR ≥ [Strain.HRR_FLOOR]. */
+    val cardioTrimp: Double = trimp,
+    /** Muscular load from wrist motion, in TRIMP units (see [Strain.muscular]); 0 outside muscular windows. */
+    val muscularLoad: Double = 0.0,
+    /** Minutes inside the muscular windows that had accelerometer data. */
+    val muscularMinutes: Double = 0.0,
 )
 
 /**
@@ -75,17 +82,34 @@ data class StrainResult(
  * (T ≈ 175) ≈ 15.5, and several hard hours ≈ 19+. Each sample counts for the time until the next one, at most
  * [MAX_DT_MS], so gaps add nothing. Custom bpm zones change only the displayed time in zones, not the score.
  *
+ *
+ * v4 adds **muscular load** inside the given muscular windows (strength-type activities), where heart rate
+ * alone misses most of the effort: each second the wrist moves by more than [MOTION_FLOOR] g between band samples
+ * adds [MUSCLE_K] × (motion − floor) TRIMP per minute (capped at [MOTION_CAP] g). Only band-stored samples carry
+ * the accelerometer, so live-only data adds nothing until it is synced. Motion is not counted elsewhere, so
+ * walking or running does not count twice. The constants are guesses aimed at an hour of lifting adding ≈ 30–40.
+ *
  * v2 (Edwards TRIMP on zones, 21·(1 − e^(−T/250))) read far below WHOOP: nothing under zone 1 counted, and an
  * hour in zone 2 scored only ≈ 8.
  */
 object Strain {
-    const val METHOD = "banister-trimp-bloop21-v3"
+    const val METHOD = "banister-trimp-muscular-bloop21-v4"
     const val HRR_FLOOR = 0.3
     const val SCALE_C = 70.0
     const val SCALE_P = 1.1
     const val MAX_DT_MS = 5_000L
     /** Resting HR assumed when none is known yet (lowers confidence). */
     const val DEFAULT_REST = 60.0
+    /** Wrist motion (|Δaccel| between consecutive samples, g) below this is fidgeting, not work. */
+    const val MOTION_FLOOR = 0.1
+    const val MOTION_CAP = 1.0
+    /** Muscular TRIMP per minute per g of motion above the floor. */
+    const val MUSCLE_K = 5.0
+    /** Two samples further apart than this give no motion reading. */
+    const val MOTION_DT_MS = 2_000L
+
+    /** Muscular load per minute for a wrist motion of [motionG] (|Δaccel| between consecutive samples, in g). */
+    fun muscular(motionG: Double): Double = MUSCLE_K * (motionG.coerceAtMost(MOTION_CAP) - MOTION_FLOOR).coerceAtLeast(0.0)
 
     fun scale(trimp: Double): Double {
         if (trimp <= 0) return 0.0
@@ -99,9 +123,11 @@ object Strain {
     /**
      * With [customZones] (bpm lower bounds of zones 1..5) the displayed minutes use those zones. The score always
      * uses heart-rate reserve; without a known max, custom zones imply one (zone 5 starts at 90 % of max), and
-     * without a resting HR [DEFAULT_REST] is assumed.
+     * without a resting HR [DEFAULT_REST] is assumed. Muscular load is added for samples inside [muscularWindows]
+     * (start, end) in epoch ms.
      */
-    fun of(hr: List<HrPoint>, fromMs: Long, toMs: Long, rest: Metric<Double>, max: HrMax?, customZones: List<Int>? = null): Metric<StrainResult> {
+    fun of(hr: List<HrPoint>, fromMs: Long, toMs: Long, rest: Metric<Double>, max: HrMax?, customZones: List<Int>? = null,
+           muscularWindows: List<Pair<Long, Long>> = emptyList()): Metric<StrainResult> {
         val custom = customZones?.takeIf { it.size == 5 }
         var conf = 1.0
         val r = rest.valueOrNull ?: if (custom != null) DEFAULT_REST.also { conf *= 0.6 } else return Metric.Missing("needs a resting heart rate (one night of sleep data)")
@@ -111,6 +137,8 @@ object Strain {
         if (pts.isEmpty()) return Metric.Missing("no heart rate in this period")
         val minutes = DoubleArray(6)
         var trimp = 0.0
+        var muscle = 0.0
+        var muscleMin = 0.0
         var covered = 0L
         for (i in pts.indices) {
             val next = if (i + 1 < pts.size) pts[i + 1].tsMs else pts[i].tsMs + 1000
@@ -120,10 +148,21 @@ object Strain {
             val z = if (custom != null) Zones.ofBounds(pts[i].hr, custom) else Zones.ofMax(pts[i].hr, m.bpm)
             minutes[z] += dtMin
             trimp += dtMin * weight((pts[i].hr - r) / (m.bpm - r))
+            val p = pts[i]
+            if (i > 0 && muscularWindows.any { p.tsMs >= it.first && p.tsMs < it.second }) {
+                val q = pts[i - 1]
+                if (p.ax != null && p.ay != null && p.az != null && q.ax != null && q.ay != null && q.az != null &&
+                    p.tsMs - q.tsMs in 1..MOTION_DT_MS) {
+                    val dx = (p.ax - q.ax).toDouble(); val dy = (p.ay - q.ay).toDouble(); val dz = (p.az - q.az).toDouble()
+                    muscle += dtMin * muscular(sqrt(dx * dx + dy * dy + dz * dz))
+                    muscleMin += dtMin
+                }
+            }
         }
         val coverage = covered.toDouble() / (toMs - fromMs)
         val confidence = coverage.coerceAtMost(1.0) * conf * m.confidence * rest.confidenceOrZero.coerceAtLeast(0.5)
-        return Metric.Estimated(StrainResult(scale(trimp), trimp, minutes.toList(), coverage,
-            covered / 60_000.0, pts.last().tsMs, r, m.bpm), METHOD, confidence.coerceIn(0.0, 1.0))
+        val total = trimp + muscle
+        return Metric.Estimated(StrainResult(scale(total), total, minutes.toList(), coverage,
+            covered / 60_000.0, pts.last().tsMs, r, m.bpm, trimp, muscle, muscleMin), METHOD, confidence.coerceIn(0.0, 1.0))
     }
 }

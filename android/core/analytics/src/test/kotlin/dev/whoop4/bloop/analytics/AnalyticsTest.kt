@@ -256,6 +256,23 @@ class StrainTest {
         assertEquals("5 s + 1 s", 6 / 60.0 * w(160), s.value.trimp, 1e-9)
     }
 
+    @Test fun muscularLoadOnlyInsideWindows() {
+        // An hour at 100 bpm (HRR 31 %) with the wrist swinging 0.5 g between samples every other second.
+        val pts = (0 until 3600).map { s -> val x = if (s % 2 == 0) 0f else 0.5f; HrPoint(s * 1000L, 100, x, 0f, 1f) }
+        val rest = Metric.Derived(60.0, "t", 1.0)
+        val plain = Strain.of(pts, 0, HOUR, rest, max) as Metric.Estimated
+        val lifting = Strain.of(pts, 0, HOUR, rest, max, muscularWindows = listOf(0L to HOUR)) as Metric.Estimated
+        assertEquals(0.0, plain.value.muscularLoad, 1e-9)
+        assertEquals(Strain.muscular(0.5) * 60, lifting.value.muscularLoad, 1.0)   // every step moves 0.5 g
+        assertEquals(plain.value.cardioTrimp, lifting.value.cardioTrimp, 1e-9)
+        assertTrue(lifting.value.score > plain.value.score + 3)
+        // No accelerometer (live-only data): nothing muscular.
+        val live = pts.map { HrPoint(it.tsMs, it.hr) }
+        assertEquals(0.0, (Strain.of(live, 0, HOUR, rest, max, muscularWindows = listOf(0L to HOUR)) as Metric.Estimated).value.muscularLoad, 1e-9)
+    }
+
+    @Test fun fidgetingIsNotMuscular() = assertEquals(0.0, Strain.muscular(0.05), 1e-9)
+
     @Test fun scaleIsBounded() {
         assertEquals(0.0, Strain.scale(0.0), 1e-9)
         assertTrue(Strain.scale(1e6) <= 21.0)

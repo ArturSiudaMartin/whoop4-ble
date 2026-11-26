@@ -144,6 +144,10 @@ interface ActivityDao {
     @Query("SELECT * FROM activity_session WHERE id = :id")
     suspend fun get(id: Long): ActivitySessionEntity?
 
+    /** Sessions overlapping [from, to) (a running one counts as open-ended). */
+    @Query("SELECT * FROM activity_session WHERE startUtcMs < :to AND (endUtcMs IS NULL OR endUtcMs > :from)")
+    suspend fun overlapping(from: Long, to: Long): List<ActivitySessionEntity>
+
     /** The session being recorded now (no end time yet), if any. */
     @Query("SELECT * FROM activity_session WHERE endUtcMs IS NULL ORDER BY startUtcMs DESC LIMIT 1")
     fun observeRunning(): Flow<ActivitySessionEntity?>

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import dev.whoop4.bloop.analytics.HeartRateMax
 import dev.whoop4.bloop.analytics.HrMax
@@ -240,6 +242,7 @@ internal fun SessionsSection(granted: Boolean, onOpen: (Long) -> Unit) {
                 deviceAddress = s.address, type = type.key, origin = "MANUAL", startUtcMs = from, endUtcMs = to,
                 name = name, createdAtUtcMs = System.currentTimeMillis(),
             ))
+            app.recomputeFrom(from)
             onOpen(id)
         }
     }
@@ -291,11 +294,13 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
     val stats = remember(hr, custom, maxHr) { sessionStats(hr, zoneOf) }
     val end = a.endUtcMs ?: System.currentTimeMillis()
     val restHr = app.settings.restingHr?.toDouble() ?: storedRest.firstOrNull()?.value
-    val activityStrain = remember(hr, maxHr, restHr, custom) {
+    val strainResult = remember(hr, maxHr, restHr, custom, type) {
         Strain.of(hr, a.startUtcMs, end + 1,
             restHr?.let { Metric.Derived(it, "stored", 1.0) } ?: Metric.Missing("no resting HR"),
-            maxHr?.let { HrMax(it, "stored", 1.0) }, custom).valueOrNull?.score
+            maxHr?.let { HrMax(it, "stored", 1.0) }, custom,
+            if (type.muscular) listOf(a.startUtcMs to end + 1) else emptyList()).valueOrNull
     }
+    val activityStrain = strainResult?.score
 
     Page {
         Row(Modifier.fillMaxWidth().clickable { changingType = true }, verticalAlignment = Alignment.CenterVertically) {
@@ -309,12 +314,19 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
             }
             Text("Change", color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        // Strain ("14.9") needs a character more than the BPM tiles, so it gets a wider share of the row.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             StatTile("Average", stats?.let { "%.0f".format(it.avg) }, Modifier.weight(1f))
             StatTile("Max", stats?.max?.toString(), Modifier.weight(1f))
             StatTile("Min", stats?.min?.toString(), Modifier.weight(1f))
-            StatTile("Strain", activityStrain?.let { "%.1f".format(it) }, Modifier.weight(1f), unit = "")
+            StatTile("Strain", activityStrain?.let { "%.1f".format(it) }, Modifier.weight(1.3f), unit = "")
         }
+        if (type.muscular && strainResult != null) Text(
+            if (strainResult.muscularMinutes > 0) "Strain includes muscular load from wrist motion: %.0f %% of the total (%.0f min with motion data).".format(
+                100 * strainResult.muscularLoad / strainResult.trimp.coerceAtLeast(1e-9), strainResult.muscularMinutes)
+            else "Muscular load comes from the band's own motion data: sync after the workout to add it to strain.",
+            color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall,
+        )
         CardBox(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Heart rate", style = MaterialTheme.typography.titleMedium)
@@ -389,7 +401,7 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
 
     if (changingType) ActivityPicker(emptyList(), onDismiss = { changingType = false }) { t ->
         changingType = false
-        app.scope.launch { app.db.activities().update(a.copy(type = t.key)) }
+        app.scope.launch { app.db.activities().update(a.copy(type = t.key)); app.recomputeFrom(a.startUtcMs) }
     }
     if (renaming) NameDialog("Rename", "Save", initial = a.name.orEmpty(), placeholder = type.label, onDismiss = { renaming = false }) { name ->
         renaming = false
@@ -399,7 +411,7 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
         onDismissRequest = { deleting = false },
         title = { Text("Delete this activity?") },
         text = { Text("Only the activity is removed from Bloop (not from Strava). Its heart-rate data stays on the phone.") },
-        confirmButton = { TextButton({ deleting = false; app.scope.launch { app.db.activities().delete(a.id); app.settings.setStravaActivity(a.id, null) }; onClosed() }) { Text("Delete", color = BloopColors.Strain) } },
+        confirmButton = { TextButton({ deleting = false; app.scope.launch { app.db.activities().delete(a.id); app.settings.setStravaActivity(a.id, null); app.recomputeFrom(a.startUtcMs) }; onClosed() }) { Text("Delete", color = BloopColors.Strain) } },
         dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } },
         containerColor = BloopColors.Surface,
     )
@@ -419,8 +431,11 @@ private fun shareTcx(ctx: Context, a: ActivitySessionEntity, hr: List<HrPoint>) 
 @Composable
 internal fun StatTile(label: String, value: String?, modifier: Modifier, unit: String = " BPM") = CardBox(modifier) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text(value ?: "—", style = MaterialTheme.typography.headlineMedium, color = if (value == null) BloopColors.Muted else BloopColors.OnSurface)
-        Text(label.uppercase() + unit, style = MaterialTheme.typography.labelSmall, color = BloopColors.Muted)
+        // One line always: on a narrow phone the text shrinks instead of wrapping "14.9" after the point.
+        Text(value ?: "—", style = MaterialTheme.typography.headlineMedium, color = if (value == null) BloopColors.Muted else BloopColors.OnSurface,
+            maxLines = 1, softWrap = false,
+            autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = MaterialTheme.typography.headlineMedium.fontSize))
+        Text(label.uppercase() + unit, style = MaterialTheme.typography.labelSmall, color = BloopColors.Muted, maxLines = 1, softWrap = false)
     }
 }
 

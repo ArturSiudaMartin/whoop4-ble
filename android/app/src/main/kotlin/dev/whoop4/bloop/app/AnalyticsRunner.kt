@@ -160,7 +160,9 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         }
         val restingForStrain = restingBaseline(nights, night.restingHr.valueOrNull?.bpm)
         val maxForStrain = maxHr(history, dayHr)
-        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxForStrain, settings.zoneBounds)
+        val muscularWindows = Activities.muscularWindows(db.activities().overlapping(dayStart, dayEnd)
+            .filter { it.deviceAddress == null || it.deviceAddress == device }, now)
+        val strain = Strain.of(dayHr, dayStart, minOf(dayEnd, now), restingForStrain, maxForStrain, settings.zoneBounds, muscularWindows)
         if (strain is Metric.Estimated) {
             put(MetricKeys.STRAIN, strain.value.score, MetricKind.ESTIMATED, strain.method, strain.confidence)
             put(MetricKeys.TRIMP, strain.value.trimp, MetricKind.ESTIMATED, strain.method, strain.confidence)
@@ -174,7 +176,8 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         restingForStrain.valueOrNull?.let { put(MetricKeys.ZONE_REST, it, MetricKind.DERIVED, restingForStrain.methodOrEmpty(), null) }
         maxForStrain?.let { put(MetricKeys.ZONE_MAX, it.bpm, MetricKind.DERIVED, it.source, null) }
         log.i("analytics $day strain: ${storedDayHr.size} stored + ${liveFill.size} live samples, " + when (strain) {
-            is Metric.Estimated -> "%.1f, zones %s min, data %.0f min".format(strain.value.score,
+            is Metric.Estimated -> "%.1f (cardio %.0f + muscular %.0f over %.0f min), zones %s min, data %.0f min".format(strain.value.score,
+                strain.value.cardioTrimp, strain.value.muscularLoad, strain.value.muscularMinutes,
                 (1..5).joinToString("/") { "%.0f".format(strain.value.zoneMinutes[it]) }, strain.value.minutesWithData)
             is Metric.Missing -> "none: ${strain.reason}"
             else -> "?"
@@ -224,9 +227,10 @@ class AnalyticsRunner(private val db: BloopDatabase, private val settings: Setti
         return out
     }
 
-    /** Heart rate for a time range (e.g. an activity session): band-stored samples, with live readings filling their gaps. */
+    /** Heart rate (with accelerometer where the band stored it) for a time range, e.g. an activity session: band-stored samples, with live readings filling their gaps. */
     suspend fun heartRate(device: String, from: Long, to: Long): List<HrPoint> {
-        val stored = db.samples().samplesBetween(device, SampleSource.HISTORICAL, from, to).filter { it.hr > 0 }.map { HrPoint(it.tsUtcMs, it.hr) }
+        val stored = db.samples().samplesBetween(device, SampleSource.HISTORICAL, from, to).filter { it.hr > 0 }
+            .map { HrPoint(it.tsUtcMs, it.hr, it.accelX, it.accelY, it.accelZ) }
         val fill = liveGapFill(device, stored, from, to)
         return if (fill.isEmpty()) stored else (stored + fill).sortedBy { it.tsMs }
     }

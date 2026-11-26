@@ -121,6 +121,14 @@ class BloopApplication : Application() {
         }
     }
 
+    /** Recompute from the day containing [fromUtcMs] (e.g. after an activity was added, retyped or deleted). */
+    fun recomputeFrom(fromUtcMs: Long) {
+        scope.launch {
+            val a = band.status.value.address ?: return@launch
+            analytics.recompute(a, fromUtcMs)
+        }
+    }
+
     /** Recompute everything (e.g. after the profile changed). */
     fun recomputeAll() {
         scope.launch {
