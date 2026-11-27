@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +27,7 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -74,6 +76,8 @@ import dev.whoop4.bloop.app.MetricKeys
 import dev.whoop4.bloop.app.Tcx
 import dev.whoop4.bloop.data.ActivitySessionEntity
 import dev.whoop4.bloop.data.SampleSource
+import dev.whoop4.bloop.ui.ActivityIcon
+import dev.whoop4.bloop.ui.ActivityIcons
 import dev.whoop4.bloop.ui.theme.BloopColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -137,7 +141,7 @@ internal fun SessionsSection(granted: Boolean, onOpen: (Long) -> Unit) {
             val r = running
             if (r != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(Activities.of(r.type).emoji, style = MaterialTheme.typography.headlineMedium)
+                    ActivityIcon(Activities.of(r.type), 32.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(r.title(), style = MaterialTheme.typography.bodyLarge)
@@ -205,7 +209,7 @@ internal fun SessionsSection(granted: Boolean, onOpen: (Long) -> Unit) {
             ofDay.forEach { a ->
                 val endMs = a.endUtcMs ?: return@forEach
                 Row(Modifier.fillMaxWidth().clickable { onOpen(a.id) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(Activities.of(a.type).emoji, style = MaterialTheme.typography.titleMedium)
+                    ActivityIcon(Activities.of(a.type), 24.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(a.title(), style = MaterialTheme.typography.bodyLarge)
@@ -304,7 +308,7 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
 
     Page {
         Row(Modifier.fillMaxWidth().clickable { changingType = true }, verticalAlignment = Alignment.CenterVertically) {
-            Text(type.emoji, style = MaterialTheme.typography.displayLarge)
+            ActivityIcon(type, 48.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(a.title(), style = MaterialTheme.typography.headlineMedium)
@@ -371,7 +375,11 @@ fun SessionScreen(id: Long, onClosed: () -> Unit) {
                     stravaAthlete == null -> Text("To upload straight to Strava, connect it on the Device screen (Strava card). " +
                         "You can also share a TCX file and upload it at strava.com → Upload activity.", color = BloopColors.Muted, style = MaterialTheme.typography.bodyMedium)
                     stravaId != null -> {
-                        Text("On Strava ✓", color = BloopColors.Recovery)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("On Strava", color = BloopColors.Recovery)
+                            Spacer(Modifier.width(6.dp))
+                            Icon(ActivityIcons.Check, contentDescription = null, tint = BloopColors.Recovery, modifier = Modifier.size(18.dp))
+                        }
                         SecondaryButton("Open in Strava", Modifier.fillMaxWidth()) {
                             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.strava.com/activities/$stravaId")))
                         }
@@ -587,7 +595,7 @@ private fun ActivityPicker(recent: List<ActivityType>, onDismiss: () -> Unit, on
 @Composable
 private fun ActivityRow(t: ActivityType, onClick: () -> Unit) =
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(t.emoji, style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(36.dp))
+        ActivityIcon(t, 24.dp, Modifier.width(36.dp))
         Text(t.label, style = MaterialTheme.typography.bodyLarge)
     }
 
@@ -630,7 +638,7 @@ private fun PastSessionDialog(recent: List<ActivityType>, onDismiss: () -> Unit,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth().clickable { choosingType = true }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(type.emoji, style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(36.dp))
+                    ActivityIcon(type, 24.dp, Modifier.width(36.dp))
                     Text(type.label, modifier = Modifier.weight(1f))
                     Text("Change", color = BloopColors.Muted, style = MaterialTheme.typography.labelSmall)
                 }
